@@ -119,12 +119,12 @@ public class Freecam extends Module {
 
         // Mouse look. The player's rotation is the single source of truth: the mouse normally turns the
         // player, so we read it from there. If the game turned the camera entity instead, fold that in too.
-        float yaw = p.getYRot() + (cam.getYRot() - camYaw);
-        float pitch = Mth.clamp(p.getXRot() + (cam.getXRot() - camPitch), -90f, 90f);
-        p.setYRot(yaw);
-        p.setXRot(pitch);
-        camYaw = yaw;
-        camPitch = pitch;
+        float newYaw = p.getYRot() + (cam.getYRot() - camYaw);
+        float newPitch = Mth.clamp(p.getXRot() + (cam.getXRot() - camPitch), -90f, 90f);
+        p.setYRot(newYaw);
+        p.setXRot(newPitch);
+        camYaw = newYaw;
+        camPitch = newPitch;
 
         long now = System.nanoTime();
         double dt = Math.min(0.1, (now - lastNanos) / 1.0e9);
