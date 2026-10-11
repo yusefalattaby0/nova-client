@@ -32,7 +32,7 @@ public class NovaClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
             while (OPEN_GUI.consumeClick()) {
-                if (mc.screen == null) mc.setScreen(new ClickGui());
+                if (mc.gui.screen() == null) mc.gui.setScreen(new ClickGui());
             }
             ModuleManager.tick(mc);
         });

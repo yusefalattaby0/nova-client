@@ -81,7 +81,7 @@ public class SpawnerFinder extends EspModule {
         String msg = fresh == 1
                 ? "Spawner found at " + first.getX() + ", " + first.getY() + ", " + first.getZ()
                 : fresh + " new spawners found (first at " + first.getX() + ", " + first.getY() + ", " + first.getZ() + ")";
-        mc.gui.getChat().addMessage(Component.literal("[Nova] " + msg));
+        mc.player.displayClientMessage(Component.literal("[Nova] " + msg), false);
     }
 
     @Override

@@ -7,7 +7,7 @@ import dev.nova.util.Colors;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -113,7 +113,7 @@ public abstract class EspModule extends Module {
     public final void render(Minecraft mc) {
         if (mc.level == null || mc.player == null || cache.isEmpty()) return;
 
-        Vec3 cam = mc.gameRenderer.getMainCamera().position();
+        Vec3 cam = mc.player.getEyePosition();
         Vec3 tracerFrom = mc.player.getEyePosition().add(mc.player.getViewVector(1.0f).scale(0.6));
         double maxRange = range.d();
         float width = lineWidth.f();
