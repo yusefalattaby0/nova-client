@@ -3,6 +3,7 @@ package dev.nova;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.nova.gui.ClickGui;
 import dev.nova.module.ModuleManager;
+import dev.nova.module.render.Freecam;
 import dev.nova.util.Config;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -26,13 +27,21 @@ public class NovaClient implements ClientModInitializer {
     public static final KeyMapping OPEN_GUI = KeyMappingHelper.registerKeyMapping(
             new KeyMapping("key.nova.open_gui", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, CATEGORY));
 
+    public static final KeyMapping FREECAM_KEY = KeyMappingHelper.registerKeyMapping(
+            new KeyMapping("key.nova.freecam", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V, CATEGORY));
+
     @Override
     public void onInitializeClient() {
         ModuleManager.init();
 
+        ClientTickEvents.START_CLIENT_TICK.register(ModuleManager::preTick);
+
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
             while (OPEN_GUI.consumeClick()) {
                 if (mc.gui.screen() == null) mc.gui.setScreen(new ClickGui());
+            }
+            while (FREECAM_KEY.consumeClick()) {
+                if (mc.gui.screen() == null) ModuleManager.get(Freecam.class).toggle();
             }
             ModuleManager.tick(mc);
         });

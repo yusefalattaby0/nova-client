@@ -2,6 +2,7 @@ package dev.nova.module;
 
 import dev.nova.module.client.GuiSettings;
 import dev.nova.module.render.EspModule;
+import dev.nova.module.render.Freecam;
 import dev.nova.module.render.SpawnerFinder;
 import dev.nova.module.render.StorageFinder;
 import dev.nova.util.Config;
@@ -18,6 +19,7 @@ public final class ModuleManager {
     public static void init() {
         register(new StorageFinder());
         register(new SpawnerFinder());
+        register(new Freecam());
         register(new GuiSettings());
         Config.load();
     }
@@ -44,9 +46,15 @@ public final class ModuleManager {
         for (Module m : MODULES) if (m.enabled()) m.onTick(mc);
     }
 
+    public static void preTick(Minecraft mc) {
+        for (Module m : new ArrayList<>(MODULES)) if (m.enabled()) m.onPreTick(mc);
+    }
+
     public static void render(Minecraft mc) {
-        for (Module m : MODULES) {
-            if (m.enabled() && m instanceof EspModule esp) esp.render(mc);
+        for (Module m : new ArrayList<>(MODULES)) {
+            if (!m.enabled()) continue;
+            m.onFrame(mc);
+            if (m instanceof EspModule esp) esp.render(mc);
         }
     }
 }

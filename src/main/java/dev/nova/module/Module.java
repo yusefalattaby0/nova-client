@@ -57,4 +57,8 @@ public abstract class Module {
     protected void onEnable() {}
     protected void onDisable() {}
     public void onTick(Minecraft mc) {}
+    /** Runs at the very start of each client tick. */
+    public void onPreTick(Minecraft mc) {}
+    /** Runs once per rendered frame while the module is on. */
+    public void onFrame(Minecraft mc) {}
 }
