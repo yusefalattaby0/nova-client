@@ -13,12 +13,12 @@ import net.minecraft.world.phys.Vec3;
 
 /**
  * Detached camera. Your real player stays where it is (and stays still);
- * the view is moved by a client-only stand-in entity. Nothing about the camera is sent to the server.
+ * the view is moved by a client-only stand-in entity. The camera position is never sent to the server,
+ * but your player does turn to face where you look (the server sees that rotation).
  *
  * How it works, in plain terms:
  *  - the player's movement input is swapped for an empty one, so WASD does not move the player
- *  - mouse movement still turns the player, so every frame we read how much it turned,
- *    add that to the camera's rotation, and put the player's rotation back
+ *  - the camera looks wherever the mouse turns (the player turns with it; your original look direction is restored on exit)
  *  - clicks (attack / use / pick block) are swallowed so you can't interact from the camera
  */
 public class Freecam extends Module {
@@ -114,10 +114,17 @@ public class Freecam extends Module {
         }
         LocalPlayer p = mc.player;
 
-        // mouse look: how far did the mouse turn the player since we last put it back?
-        camYaw += p.getYRot() - savedYaw;
-        camPitch = Mth.clamp(camPitch + (p.getXRot() - savedPitch), -90f, 90f);
-        restorePlayerRotation(p);
+        // keep the game looking through our camera (cheap; guards against anything resetting it)
+        mc.setCameraEntity(cam);
+
+        // Mouse look. The player's rotation is the single source of truth: the mouse normally turns the
+        // player, so we read it from there. If the game turned the camera entity instead, fold that in too.
+        float yaw = p.getYRot() + (cam.getYRot() - camYaw);
+        float pitch = Mth.clamp(p.getXRot() + (cam.getXRot() - camPitch), -90f, 90f);
+        p.setYRot(yaw);
+        p.setXRot(pitch);
+        camYaw = yaw;
+        camPitch = pitch;
 
         long now = System.nanoTime();
         double dt = Math.min(0.1, (now - lastNanos) / 1.0e9);
