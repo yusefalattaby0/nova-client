@@ -164,7 +164,12 @@ public class Freecam extends Module {
         cam.setPos(ex, ey - cam.getEyeHeight(), ez);
         cam.setYRot(camYaw);
         cam.setXRot(camPitch);
+        // A living entity's view looks along its HEAD rotation, so that has to follow too.
+        cam.setYHeadRot(camYaw);
+        cam.setYBodyRot(camYaw);
         cam.setOldPosAndRot(); // no interpolation lag: the camera is exactly where we put it
+        cam.yHeadRotO = camYaw;
+        cam.yBodyRotO = camYaw;
     }
 
     private void restorePlayerRotation(LocalPlayer p) {
