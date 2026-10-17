@@ -1,6 +1,7 @@
 package dev.nova.module;
 
 import dev.nova.module.client.GuiSettings;
+import dev.nova.module.render.EntityEsp;
 import dev.nova.module.render.EspModule;
 import dev.nova.module.render.Freecam;
 import dev.nova.module.render.OreFinder;
@@ -20,6 +21,7 @@ public final class ModuleManager {
 
     public static void init() {
         register(new StorageFinder());
+        register(new EntityEsp());
         register(new SpawnerFinder());
         register(new OreFinder());
         register(new RespawnAnchorFinder());
