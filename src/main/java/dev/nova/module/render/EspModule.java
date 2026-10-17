@@ -6,6 +6,7 @@ import dev.nova.setting.Setting;
 import dev.nova.util.Colors;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -109,6 +110,11 @@ public abstract class EspModule extends Module {
         onRescan(mc, out);
     }
 
+    /** Fraction of the current tick that has passed, for smooth per-frame positions. */
+    protected static float partialTick(Minecraft mc) {
+        return mc.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+    }
+
     private int resolveColor(int base) {
         return switch (colorMode.get()) {
             case STATIC -> base;
@@ -120,8 +126,11 @@ public abstract class EspModule extends Module {
     public final void render(Minecraft mc) {
         if (mc.level == null || mc.player == null || cache.isEmpty()) return;
 
-        Vec3 cam = mc.player.getEyePosition();
-        Vec3 tracerFrom = mc.player.getEyePosition().add(mc.player.getViewVector(1.0f).scale(0.6));
+        // Use the smoothed (per-frame) camera, not the per-tick player position, so tracers don't jitter.
+        float pt = partialTick(mc);
+        Entity view = mc.getCameraEntity() != null ? mc.getCameraEntity() : mc.player;
+        Vec3 cam = view.getEyePosition(pt);
+        Vec3 tracerFrom = cam.add(view.getViewVector(pt).scale(0.6));
         double maxRange = range.d();
         float width = lineWidth.f();
         EspMode m = mode.get();
