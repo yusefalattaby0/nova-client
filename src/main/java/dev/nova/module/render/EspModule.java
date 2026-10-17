@@ -27,12 +27,15 @@ public abstract class EspModule extends Module {
     protected final Setting.Num fillOpacity = new Setting.Num("Fill Opacity", 25, 0, 100, 1, "%");
     protected final Setting.Num lineWidth = new Setting.Num("Line Width", 2, 0.5, 6, 0.5, " px");
     protected final Setting.Num expand = new Setting.Num("Box Expand", 0.01, 0, 0.25, 0.01, "");
-    protected final Setting.Num range = new Setting.Num("Range (0 = unlimited)", 128, 0, 512, 8, "");
+    protected final Setting.Num range = new Setting.Num("Range (0 = unlimited)", 128, 0, 2048, 16, "");
     protected final Setting.Bool distanceFade = new Setting.Bool("Distance Fade", true);
     protected final Setting.Bool throughWalls = new Setting.Bool("Through Walls", true);
     protected final Setting.Bool tracers = new Setting.Bool("Tracers", false);
     protected final Setting.Num tracerOpacity = new Setting.Num("Tracer Opacity", 60, 0, 100, 1, "%");
     protected final Setting.Num scanInterval = new Setting.Num("Scan Interval", 10, 2, 60, 1, " ticks");
+
+    /** Chunks beyond what the server sent are simply empty, so a big radius is safe. */
+    protected static final int MAX_CHUNK_RADIUS = 64;
 
     private List<Target> cache = List.of();
     private int tickCounter;
@@ -87,8 +90,7 @@ public abstract class EspModule extends Module {
         }
         if (tickCounter++ % Math.max(1, scanInterval.i()) != 0) return;
 
-        int renderDistance = mc.options.getEffectiveRenderDistance();
-        int chunkRange = range.d() > 0 ? Math.min(renderDistance, (int) Math.ceil(range.d() / 16.0) + 1) : renderDistance;
+        int chunkRange = range.d() > 0 ? Math.min(MAX_CHUNK_RADIUS, (int) Math.ceil(range.d() / 16.0) + 1) : MAX_CHUNK_RADIUS;
         BlockPos p = mc.player.blockPosition();
         int cx = p.getX() >> 4;
         int cz = p.getZ() >> 4;
@@ -131,7 +133,7 @@ public abstract class EspModule extends Module {
 
             float fade = 1f;
             if (distanceFade.get()) {
-                double ref = maxRange > 0 ? maxRange : 128.0;
+                double ref = maxRange > 0 ? maxRange : 1024.0;
                 fade = (float) Math.max(0.2, 1.0 - (dist / ref) * 0.8);
             }
 
