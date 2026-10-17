@@ -32,8 +32,8 @@ import java.util.function.Predicate;
  * cannot contain a wanted block at all, and keeps the results per chunk.
  */
 public abstract class BlockEspModule extends EspModule {
-    protected final Setting.Num chunksPerTick = new Setting.Num("Scan Speed", 4, 1, 16, 1, " chunks/tick");
-    protected final Setting.Num maxBoxes = new Setting.Num("Max Boxes", 800, 50, 5000, 50, "");
+    protected final Setting.Num chunksPerTick = new Setting.Num("Scan Speed", 8, 1, 64, 1, " chunks/tick");
+    protected final Setting.Num maxBoxes = new Setting.Num("Max Boxes", 2500, 50, 20000, 50, "");
 
     private final Map<Long, List<Target>> results = new HashMap<>();
     private final ArrayDeque<int[]> queue = new ArrayDeque<>();
@@ -94,8 +94,7 @@ public abstract class BlockEspModule extends EspModule {
         BlockPos p = mc.player.blockPosition();
         int pcx = p.getX() >> 4;
         int pcz = p.getZ() >> 4;
-        int renderDistance = mc.options.getEffectiveRenderDistance();
-        int radius = range.d() > 0 ? Math.min(renderDistance, (int) Math.ceil(range.d() / 16.0)) : renderDistance;
+        int radius = range.d() > 0 ? Math.min(MAX_CHUNK_RADIUS, (int) Math.ceil(range.d() / 16.0)) : MAX_CHUNK_RADIUS;
 
         int budget = chunksPerTick.i();
         while (budget > 0) {
