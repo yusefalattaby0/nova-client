@@ -1,6 +1,8 @@
 package dev.nova.module;
 
 import dev.nova.module.client.GuiSettings;
+import dev.nova.module.combat.AutoTotem;
+import dev.nova.module.combat.FastCrystal;
 import dev.nova.module.render.EntityEsp;
 import dev.nova.module.render.EspModule;
 import dev.nova.module.render.Freecam;
@@ -25,6 +27,8 @@ public final class ModuleManager {
         register(new SpawnerFinder());
         register(new OreFinder());
         register(new RespawnAnchorFinder());
+        register(new AutoTotem());
+        register(new FastCrystal());
         register(new Freecam());
         register(new GuiSettings());
         Config.load();
