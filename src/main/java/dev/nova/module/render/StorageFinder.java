@@ -62,6 +62,11 @@ public class StorageFinder extends EspModule {
         }
 
         addBehaviorSettings();
+
+        // Long sight by default: only limited by how many chunks the server sends you.
+        range.set(1024.0);
+        distanceFade.set(false);
+        scanInterval.set(20.0);
     }
 
     private static Kind kindOf(BlockState state) {
