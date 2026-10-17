@@ -84,9 +84,13 @@ public class OreFinder extends BlockEspModule {
         addScanSettings();
         addBehaviorSettings();
 
-        // Ores are everywhere, so a shorter default range keeps things readable and fast.
-        range.set(64.0);
-        mode.set(EspMode.OUTLINE);
+        // Strong defaults: see far, fast scan, bold boxes, always visible through walls.
+        range.set(192.0);
+        mode.set(EspMode.BOTH);
+        lineWidth.set(3.0);
+        fillOpacity.set(35.0);
+        scanInterval.set(4.0);
+        distanceFade.set(false);
     }
 
     @Override
