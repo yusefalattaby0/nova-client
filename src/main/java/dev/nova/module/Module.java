@@ -11,6 +11,7 @@ import java.util.function.BooleanSupplier;
 public abstract class Module {
     public enum Category {
         RENDER("Render"),
+        COMBAT("Combat"),
         CLIENT("Client");
 
         public final String label;
