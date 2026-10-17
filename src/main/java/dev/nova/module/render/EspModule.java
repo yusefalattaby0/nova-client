@@ -61,6 +61,11 @@ public abstract class EspModule extends Module {
         add(scanInterval);
     }
 
+    /** Lets scanner subclasses that don't use block entities hand over their own results. */
+    protected final void setTargets(List<Target> targets) {
+        this.cache = targets;
+    }
+
     /** Inspect one block entity and add zero or more targets. */
     protected abstract void collect(Level level, BlockEntity be, List<Target> out);
 

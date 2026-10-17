@@ -3,6 +3,8 @@ package dev.nova.module;
 import dev.nova.module.client.GuiSettings;
 import dev.nova.module.render.EspModule;
 import dev.nova.module.render.Freecam;
+import dev.nova.module.render.OreFinder;
+import dev.nova.module.render.RespawnAnchorFinder;
 import dev.nova.module.render.SpawnerFinder;
 import dev.nova.module.render.StorageFinder;
 import dev.nova.util.Config;
@@ -19,6 +21,8 @@ public final class ModuleManager {
     public static void init() {
         register(new StorageFinder());
         register(new SpawnerFinder());
+        register(new OreFinder());
+        register(new RespawnAnchorFinder());
         register(new Freecam());
         register(new GuiSettings());
         Config.load();
