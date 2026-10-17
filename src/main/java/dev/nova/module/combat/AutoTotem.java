@@ -4,7 +4,7 @@ import dev.nova.module.Module;
 import dev.nova.setting.Setting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.Items;
 
 /** Keeps a Totem of Undying in your offhand, refilling it right after one pops. */
@@ -46,7 +46,7 @@ public class AutoTotem extends Module {
 
         // Inventory index -> player-inventory-menu slot (hotbar is 36..44), then swap with offhand (button 40).
         int menuSlot = found < 9 ? 36 + found : found;
-        mc.gameMode.handleInventoryMouseClick(p.inventoryMenu.containerId, menuSlot, 40, ClickType.SWAP, p);
+        mc.gameMode.handleContainerInput(p.inventoryMenu.containerId, menuSlot, 40, ContainerInput.SWAP, p);
         cooldown = delay.i();
     }
 }
