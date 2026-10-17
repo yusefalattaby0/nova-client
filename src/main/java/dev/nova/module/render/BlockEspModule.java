@@ -102,7 +102,7 @@ public abstract class BlockEspModule extends EspModule {
             if (queue.isEmpty()) refill(pcx, pcz, radius);
             int[] c = queue.poll();
             if (c == null) break;
-            long key = ChunkPos.asLong(c[0], c[1]);
+            long key = chunkKey(c[0], c[1]);
             ChunkAccess access = level.getChunk(c[0], c[1], ChunkStatus.FULL, false);
             if (access instanceof LevelChunk chunk) {
                 results.put(key, scanChunk(chunk));
@@ -115,13 +115,18 @@ public abstract class BlockEspModule extends EspModule {
         if (tickCounter++ % Math.max(1, scanInterval.i()) == 0) aggregate(mc);
     }
 
+    /** One number that identifies a chunk column (x in the top half, z in the bottom half). */
+    private static long chunkKey(int x, int z) {
+        return ((long) x << 32) | (z & 0xFFFFFFFFL);
+    }
+
     private void refill(int pcx, int pcz, int radius) {
         List<int[]> list = new ArrayList<>();
         Set<Long> keep = new HashSet<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 list.add(new int[]{pcx + dx, pcz + dz, dx * dx + dz * dz});
-                keep.add(ChunkPos.asLong(pcx + dx, pcz + dz));
+                keep.add(chunkKey(pcx + dx, pcz + dz));
             }
         }
         list.sort(Comparator.comparingInt(c -> c[2]));
