@@ -63,6 +63,11 @@ public abstract class BlockEspModule extends EspModule {
         return true;
     }
 
+    /** Lets a subclass reshape the final list (group blocks into chunk boxes, drop some, etc.). */
+    protected List<Target> postProcess(List<Target> all) {
+        return all;
+    }
+
     @Override
     protected final void collect(Level level, BlockEntity be, List<Target> out) {
         // unused: this module scans blocks, not block entities
@@ -175,6 +180,7 @@ public abstract class BlockEspModule extends EspModule {
             double limit = maxRange * maxRange;
             all.removeIf(t -> t.box().getCenter().distanceToSqr(eye) > limit);
         }
+        all = postProcess(all);
         int cap = maxBoxes.i();
         if (all.size() > cap) {
             all.sort(Comparator.comparingDouble(t -> t.box().getCenter().distanceToSqr(eye)));
