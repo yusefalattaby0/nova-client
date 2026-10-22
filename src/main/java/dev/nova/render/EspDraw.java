@@ -4,6 +4,8 @@ import dev.nova.module.render.EspMode;
 import dev.nova.util.Colors;
 import net.minecraft.gizmos.GizmoStyle;
 import net.minecraft.gizmos.Gizmos;
+import net.minecraft.gizmos.TextGizmo;
+import java.util.OptionalDouble;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -42,6 +44,13 @@ public final class EspDraw {
     public static void line(Vec3 from, Vec3 to, int rgb, int alpha, float width, boolean throughWalls) {
         if (alpha <= 0) return;
         var props = Gizmos.line(from, to, Colors.argb(alpha, rgb), width);
+        if (throughWalls) props.setAlwaysOnTop();
+    }
+
+    /** Floating text that always faces the camera. */
+    public static void text(Vec3 pos, String text, int rgb, float scale, boolean throughWalls) {
+        var props = Gizmos.billboardText(text, pos,
+                new TextGizmo.Style(Colors.argb(255, rgb), scale, OptionalDouble.empty()));
         if (throughWalls) props.setAlwaysOnTop();
     }
 
