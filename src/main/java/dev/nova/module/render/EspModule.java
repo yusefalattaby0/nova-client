@@ -115,6 +115,9 @@ public abstract class EspModule extends Module {
         return mc.getDeltaTracker().getGameTimeDeltaPartialTick(false);
     }
 
+    /** Called after the boxes are drawn, for subclasses that add labels. */
+    protected void renderExtra(Minecraft mc, Vec3 cam) {}
+
     private int resolveColor(int base) {
         return switch (colorMode.get()) {
             case STATIC -> base;
@@ -157,5 +160,6 @@ public abstract class EspModule extends Module {
                 EspDraw.line(tracerFrom, center, rgb, tracerA, 1.5f, throughWalls.get());
             }
         }
+        renderExtra(mc, cam);
     }
 }
