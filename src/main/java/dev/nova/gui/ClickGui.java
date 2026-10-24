@@ -18,29 +18,30 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 /**
  * Nova ClickGUI
- * Modern dark interface with category navigation, animated module cards,
- * expandable settings, scrolling and draggable setting controls.
+ * Dark purple interface with category navigation, searchable
+ * two-column module cards, expandable settings and scrolling.
  */
 public class ClickGui extends Screen {
-    private static final int W = 560;
-    private static final int H = 360;
-    private static final int SIDE = 128;
-    private static final int HEADER = 34;
+    private static final int W = 620;
+    private static final int H = 400;
+    private static final int SIDE = 142;
+    private static final int HEADER = 38;
+    private static final int RADIUS = 10;
 
-    // Nova dark theme
-    private static final int SIDEBAR = 0xFF111117;
-    private static final int CARD = 0xFF1C1C26;
-    private static final int CARD_HOVER = 0xFF282837;
-    private static final int TEXT = 0xFFF4F2FA;
-    private static final int SUBTEXT = 0xFFA09EAF;
-    private static final int TRACK = 0xFF383747;
-    private static final int PILL = 0xFF302D40;
-    private static final int DIVIDER = 0xFF302F3C;
+    private static final int SIDEBAR = 0xFF100D18;
+    private static final int CARD = 0xFF1B1726;
+    private static final int CARD_HOVER = 0xFF292039;
+    private static final int TEXT = 0xFFF7F3FF;
+    private static final int SUBTEXT = 0xFFA99DBD;
+    private static final int TRACK = 0xFF342A45;
+    private static final int PILL = 0xFF211A2F;
+    private static final int DIVIDER = 0xFF352A47;
 
     private interface Click {
         void on(double mx, double my, int button);
@@ -61,6 +62,7 @@ public class ClickGui extends Screen {
     }
 
     private Module.Category tab = Module.Category.RENDER;
+
     private final Set<Module> expanded = new HashSet<>();
     private final Set<Setting<?>> openPickers = new HashSet<>();
     private final Map<Object, Float> anims = new HashMap<>();
@@ -74,6 +76,14 @@ public class ClickGui extends Screen {
     private int py;
     private int clipY;
     private int clipH;
+
+    private String search = "";
+    private boolean searchFocused;
+    private boolean enabledOnly;
+
+    private int searchX;
+    private int searchY;
+    private int searchW;
 
     public ClickGui() {
         super(Component.literal("Nova"));
@@ -95,10 +105,14 @@ public class ClickGui extends Screen {
     // ------------------------------------------------------------
 
     @Override
-    public boolean mouseClicked(MouseButtonEvent e, boolean doubleClick) {
+    public boolean mouseClicked(
+            MouseButtonEvent e, boolean doubleClick
+    ) {
         double mx = e.x();
         double my = e.y();
         int btn = e.button();
+
+        searchFocused = false;
 
         for (int i = hits.size() - 1; i >= 0; i--) {
             Hit h = hits.get(i);
@@ -144,18 +158,68 @@ public class ClickGui extends Screen {
     public boolean mouseScrolled(
             double mx, double my, double sx, double sy
     ) {
-        scroll = clampScroll(scroll - sy * 24);
+        if (mx >= px + SIDE && mx <= px + W
+                && my >= py + 70 && my <= py + H - 5) {
+            scroll = clampScroll(scroll - sy * 28);
+        }
+
         return true;
     }
 
     @Override
     public boolean keyPressed(KeyEvent event) {
-        if (event.key() == GLFW.GLFW_KEY_RIGHT_SHIFT) {
+        int key = event.key();
+
+        if (key == GLFW.GLFW_KEY_RIGHT_SHIFT) {
             onClose();
             return true;
         }
 
-        return super.keyPressed(event);
+        if (!searchFocused) {
+            return super.keyPressed(event);
+        }
+
+        if (key == GLFW.GLFW_KEY_ESCAPE
+                || key == GLFW.GLFW_KEY_ENTER
+                || key == GLFW.GLFW_KEY_KP_ENTER) {
+            searchFocused = false;
+            return true;
+        }
+
+        if (key == GLFW.GLFW_KEY_BACKSPACE) {
+            if (!search.isEmpty()) {
+                search = search.substring(0, search.length() - 1);
+                scroll = 0;
+            }
+            return true;
+        }
+
+        char c = searchCharacter(key);
+
+        if (c != '\0' && search.length() < 48) {
+            search += c;
+            scroll = 0;
+        }
+
+        return true;
+    }
+
+    private static char searchCharacter(int key) {
+        if (key >= GLFW.GLFW_KEY_A && key <= GLFW.GLFW_KEY_Z) {
+            return (char) ('a' + key - GLFW.GLFW_KEY_A);
+        }
+
+        if (key >= GLFW.GLFW_KEY_0 && key <= GLFW.GLFW_KEY_9) {
+            return (char) ('0' + key - GLFW.GLFW_KEY_0);
+        }
+
+        return switch (key) {
+            case GLFW.GLFW_KEY_SPACE -> ' ';
+            case GLFW.GLFW_KEY_MINUS -> '-';
+            case GLFW.GLFW_KEY_PERIOD -> '.';
+            case GLFW.GLFW_KEY_SLASH -> '/';
+            default -> '\0';
+        };
     }
 
     private double clampScroll(double v) {
@@ -214,6 +278,23 @@ public class ClickGui extends Screen {
         }
     }
 
+    private static String fitText(String value, int maxWidth) {
+        if (value == null || Draw.width(value) <= maxWidth) {
+            return value == null ? "" : value;
+        }
+
+        String suffix = "...";
+        int end = value.length();
+
+        while (end > 0
+                && Draw.width(value.substring(0, end) + suffix)
+                > maxWidth) {
+            end--;
+        }
+
+        return end > 0 ? value.substring(0, end) + suffix : "";
+    }
+
     // ------------------------------------------------------------
     // Rendering
     // ------------------------------------------------------------
@@ -226,7 +307,7 @@ public class ClickGui extends Screen {
         hits.clear();
 
         int accent = 0xFF000000 | GuiSettings.accent();
-        int radius = GuiSettings.radius();
+        int radius = Math.max(RADIUS, GuiSettings.radius());
 
         if (GuiSettings.dimWorld()) {
             g.fill(0, 0, width, height, 0xA0000000);
@@ -254,30 +335,27 @@ public class ClickGui extends Screen {
                 radius + 2, H, SIDEBAR
         );
 
-        // Logo and branding
+        // Branding
         Draw.round(
                 g, px + 16, py + 14, 4, 25, 2, accent
         );
 
         Draw.text(g, "NOVA", px + 28, py + 15, TEXT);
-        Draw.text(
-                g, "CLIENT", px + 28, py + 27, SUBTEXT
-        );
+        Draw.text(g, "CLIENT", px + 28, py + 27, SUBTEXT);
 
-        // Sidebar separator
         Draw.rect(
                 g, px + 12, py + 46,
                 SIDE - 24, 1, DIVIDER
         );
 
-        // Categories
+        // Category navigation
         int ty = py + 58;
 
         for (Module.Category c : Module.Category.values()) {
             boolean selected = c == tab;
 
             boolean hover = over(
-                    mx, my, px + 8, ty, SIDE - 16, 26
+                    mx, my, px + 8, ty, SIDE - 16, 27
             );
 
             float a = anim(
@@ -288,7 +366,7 @@ public class ClickGui extends Screen {
             if (a > 0.01f) {
                 Draw.round(
                         g, px + 8, ty,
-                        SIDE - 16, 26, 6,
+                        SIDE - 16, 27, 8,
                         Colors.argb(
                                 Math.round(a * 0x40),
                                 GuiSettings.accent()
@@ -299,7 +377,7 @@ public class ClickGui extends Screen {
             if (selected) {
                 Draw.round(
                         g, px + 8, ty + 6,
-                        3, 14, 1, accent
+                        3, 15, 1, accent
                 );
             }
 
@@ -311,43 +389,130 @@ public class ClickGui extends Screen {
             final Module.Category category = c;
 
             hit(
-                    px + 8, ty, SIDE - 16, 26,
+                    px + 8, ty, SIDE - 16, 27,
                     (x, y, b) -> {
-                        tab = category;
-                        scroll = 0;
+                        if (b == 0) {
+                            tab = category;
+                            scroll = 0;
+                        }
                     },
                     null
             );
 
-            ty += 31;
+            ty += 33;
         }
 
         Draw.text(
-                g, "RSHIFT  /  CLOSE",
+                g, "RSHIFT / CLOSE",
                 px + 14, py + H - 18, SUBTEXT
         );
 
-        // Main content heading
+        // Main content
         int cx = px + SIDE + 18;
         int cw = W - SIDE - 36;
 
-        Draw.text(g, tab.label, cx, py + 15, TEXT);
+        Draw.text(g, tab.label, cx, py + 13, TEXT);
 
-        List<Module> mods = ModuleManager.in(tab);
+        List<Module> allMods = ModuleManager.in(tab);
+        List<Module> mods = new ArrayList<>();
+
+        String query = search.toLowerCase(Locale.ROOT).trim();
+
+        for (Module m : allMods) {
+            if (enabledOnly && !m.enabled()) {
+                continue;
+            }
+
+            String name = m.name.toLowerCase(Locale.ROOT);
+            String description =
+                    m.description.toLowerCase(Locale.ROOT);
+
+            if (!query.isEmpty()
+                    && !name.contains(query)
+                    && !description.contains(query)) {
+                continue;
+            }
+
+            mods.add(m);
+        }
+
+        String count = mods.size() + " modules";
 
         Draw.text(
-                g,
-                mods.size() + (
-                        mods.size() == 1
-                                ? " modules available"
-                                : " modules available"
-                ),
-                cx, py + 28, SUBTEXT
+                g, count,
+                cx + cw - Draw.width(count),
+                py + 27, SUBTEXT
         );
 
-        // Content viewport
-        int cy = py + 48;
-        int ch = H - 60;
+        // Search field
+        searchX = cx;
+        searchY = py + 43;
+        searchW = cw - 88;
+
+        Draw.round(
+                g, searchX, searchY,
+                searchW, 24, 9, DIVIDER
+        );
+
+        Draw.round(
+                g, searchX + 1, searchY + 1,
+                searchW - 2, 22, 8, CARD
+        );
+
+        String searchText = search.isEmpty()
+                ? (searchFocused ? "Type to search..." : "Search modules...")
+                : search + (searchFocused ? "_" : "");
+
+        Draw.text(
+                g, fitText(searchText, searchW - 18),
+                searchX + 9, searchY + 8,
+                search.isEmpty() ? SUBTEXT : TEXT
+        );
+
+        hit(
+                searchX, searchY, searchW, 24,
+                (x, y, b) -> {
+                    if (b == 0) {
+                        searchFocused = true;
+                    }
+                },
+                null
+        );
+
+        // Active-only filter
+        int filterX = cx + cw - 78;
+
+        Draw.round(
+                g, filterX, searchY,
+                78, 24, 9,
+                enabledOnly
+                        ? Colors.argb(0x80, GuiSettings.accent())
+                        : CARD
+        );
+
+        String filterLabel = enabledOnly ? "ACTIVE" : "ALL";
+
+        Draw.text(
+                g, filterLabel,
+                filterX + (78 - Draw.width(filterLabel)) / 2,
+                searchY + 8,
+                enabledOnly ? TEXT : SUBTEXT
+        );
+
+        hit(
+                filterX, searchY, 78, 24,
+                (x, y, b) -> {
+                    if (b == 0) {
+                        enabledOnly = !enabledOnly;
+                        scroll = 0;
+                    }
+                },
+                null
+        );
+
+        // Scrollable module grid
+        int cy = py + 76;
+        int ch = H - 87;
 
         clipY = cy;
         clipH = ch;
@@ -357,15 +522,34 @@ public class ClickGui extends Screen {
 
         Draw.clipOn(g, cx - 2, cy, cw + 4, ch);
 
+        int gap = 10;
+        int colW = (cw - gap) / 2;
         int y = cy - (int) scroll;
 
-        for (Module m : mods) {
-            y += card(
-                    g, m, cx, y, cw, mx, my, accent
-            ) + 7;
+        for (int i = 0; i < mods.size(); i += 2) {
+            Module left = mods.get(i);
+
+            int leftHeight = card(
+                    g, left, cx, y, colW, mx, my, accent
+            );
+
+            int rightHeight = 0;
+
+            if (i + 1 < mods.size()) {
+                Module right = mods.get(i + 1);
+
+                rightHeight = card(
+                        g, right, cx + colW + gap, y,
+                        colW, mx, my, accent
+                );
+            }
+
+            y += Math.max(leftHeight, rightHeight) + 9;
         }
 
-        contentH = y + (int) scroll - cy;
+        contentH = Math.max(
+                0, y + (int) scroll - cy - 9
+        );
 
         Draw.clipOff(g);
 
@@ -374,8 +558,7 @@ public class ClickGui extends Screen {
             int barH = Math.max(
                     24,
                     (int) (
-                            viewH
-                                    * (viewH / (double) contentH)
+                            viewH * (viewH / (double) contentH)
                     )
             );
 
@@ -386,10 +569,8 @@ public class ClickGui extends Screen {
 
             Draw.round(
                     g, px + W - 9, barY,
-                    3, barH, 1,
-                    Colors.argb(
-                            0xB0, GuiSettings.accent()
-                    )
+                    4, barH, 2,
+                    Colors.argb(0xD0, GuiSettings.accent())
             );
         }
     }
@@ -458,7 +639,7 @@ public class ClickGui extends Screen {
         );
 
         Draw.round(
-                g, x, y, w, total, 7,
+                g, x, y, w, total, 10,
                 Colors.lerp(CARD, CARD_HOVER, hoverA)
         );
 
@@ -475,20 +656,25 @@ public class ClickGui extends Screen {
             );
         }
 
-        // Module title and description
-        Draw.text(g, m.name, x + 15, y + 7, TEXT);
-
-        Draw.text(
-                g, m.description,
-                x + 15, y + 19, SUBTEXT
+        // Module name and description
+        int textMax = Math.max(
+                40, w - (m.toggleable() ? 72 : 48)
         );
 
-        int right = x + w - 14;
+        Draw.text(
+                g, fitText(m.name, textMax),
+                x + 13, y + 7, TEXT
+        );
+
+        Draw.text(
+                g, fitText(m.description, textMax),
+                x + 13, y + 22, SUBTEXT
+        );
+
+        int right = x + w - 12;
 
         if (m.toggleable()) {
-            toggleSwitch(
-                    g, right - 27, y + 11, on, accent
-            );
+            toggleSwitch(g, right - 27, y + 13, on, accent);
             right -= 42;
         }
 
@@ -497,7 +683,7 @@ public class ClickGui extends Screen {
         if (hasSettings) {
             Draw.text(
                     g, open ? "v" : ">",
-                    right - 8, y + 12,
+                    right - 8, y + 14,
                     hoverHeader ? TEXT : SUBTEXT
             );
         }
@@ -539,8 +725,8 @@ public class ClickGui extends Screen {
 
             for (Setting<?> s : visible) {
                 sy += row(
-                        g, s, x + 15, sy,
-                        w - 30, mx, my, accent
+                        g, s, x + 13, sy,
+                        w - 26, mx, my, accent
                 );
             }
         }
@@ -609,9 +795,7 @@ public class ClickGui extends Screen {
 
         float t = anim(b, b.get() ? 1f : 0f);
 
-        toggleSwitch(
-                g, x + w - 27, y + 5, t, accent
-        );
+        toggleSwitch(g, x + w - 27, y + 5, t, accent);
 
         contentHit(
                 x, y, w, 22,
@@ -644,12 +828,9 @@ public class ClickGui extends Screen {
         int trackY = y + 20;
 
         float p = anim(n, (float) n.progress());
-
         int fillW = Math.round(p * w);
 
-        Draw.round(
-                g, x, trackY, w, 4, 2, TRACK
-        );
+        Draw.round(g, x, trackY, w, 4, 2, TRACK);
 
         if (fillW > 0) {
             Draw.round(
@@ -659,8 +840,8 @@ public class ClickGui extends Screen {
         }
 
         Draw.round(
-                g, x + fillW - 4, trackY - 2,
-                8, 8, 4, 0xFFFFFFFF
+                g, Math.max(x, Math.min(x + w - 8, x + fillW - 4)),
+                trackY - 2, 8, 8, 4, 0xFFFFFFFF
         );
 
         contentHit(
@@ -694,8 +875,7 @@ public class ClickGui extends Screen {
 
         boolean hover = over(
                 mx, my, pxx, y + 3, pw, 17
-        ) && my >= clipY
-                && my < clipY + clipH;
+        ) && my >= clipY && my < clipY + clipH;
 
         Draw.round(
                 g, pxx, y + 3, pw, 17, 8,
