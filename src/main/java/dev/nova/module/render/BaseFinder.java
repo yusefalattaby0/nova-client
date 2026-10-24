@@ -41,6 +41,8 @@ public class BaseFinder extends BlockEspModule {
             GLASS = 11, TORCH = 12, TNT = 13, FIRE = 14;
     // site marker kinds
     private static final int S_STASH = 15, S_BASE = 16, S_FARM = 17, S_UNKNOWN = 18, S_RAIDED = 19;
+    // per-chunk rating levels
+    private static final int R_LOW = 20, R_MID = 21, R_HIGH = 22, R_MAX = 23;
 
     public enum Type {
         STASH("Stash"), BASE("Base"), FARM("Farm"), UNKNOWN("Unknown");
@@ -55,6 +57,8 @@ public class BaseFinder extends BlockEspModule {
             return raided ? type.label + " (raided?)" : type.label;
         }
     }
+
+    private record ChunkRating(Vec3 pos, int rating) {}
 
     private static final Map<Block, Integer> KINDS = new HashMap<>();
 
@@ -114,7 +118,17 @@ public class BaseFinder extends BlockEspModule {
     private final Setting.Num labelSize = new Setting.Num("Label Size", 1.5, 0.5, 8, 0.5, "x");
     private final Setting.Num maxLabels = new Setting.Num("Max Labels", 8, 1, 40, 1, "");
 
+    // per-chunk rating
+    private final Setting.Bool rateChunks = new Setting.Bool("Rate Chunks", true);
+    private final Setting.Num minRating = new Setting.Num("Min Chunk Rating", 25, 5, 90, 5, "%");
+    private final Setting.Bool chunkLabels = new Setting.Bool("Show Chunk Ratings", true);
+    private final Setting.Num maxChunkLabels = new Setting.Num("Max Chunk Labels", 10, 1, 40, 1, "");
+
     // colors
+    private final Setting.Col rateLowColor = new Setting.Col("Rating Low Color", 0x4DA3FF);
+    private final Setting.Col rateMidColor = new Setting.Col("Rating Medium Color", 0xFFE74D);
+    private final Setting.Col rateHighColor = new Setting.Col("Rating High Color", 0xFF9A3B);
+    private final Setting.Col rateMaxColor = new Setting.Col("Rating Very High Color", 0xFF3B3B);
     private final Setting.Col buddingColor = new Setting.Col("Budding Color", 0x9D4EDD);
     private final Setting.Col smallColor = new Setting.Col("Small Bud Color", 0x6E8BFF);
     private final Setting.Col mediumColor = new Setting.Col("Medium Bud Color", 0xA06BFF);
@@ -129,6 +143,7 @@ public class BaseFinder extends BlockEspModule {
 
     private final Map<Long, Integer> itemCounts = new HashMap<>();
     private List<Site> sites = List.of();
+    private List<ChunkRating> ratings = List.of();
     private int itemTick;
 
     public BaseFinder() {
@@ -150,6 +165,10 @@ public class BaseFinder extends BlockEspModule {
         add(useDamage);
         add(showBlocks);
         add(minScore);
+        add(rateChunks);
+        add(minRating, rateChunks::get);
+        add(chunkLabels, rateChunks::get);
+        add(maxChunkLabels, () -> rateChunks.get() && chunkLabels.get());
         add(raidSensitivity, useDamage::get);
         add(panel);
         add(panelEntries, panel::get);
@@ -166,6 +185,10 @@ public class BaseFinder extends BlockEspModule {
         add(largeColor, () -> colorMode.get() == ColorMode.STATIC && showLarge.get());
         add(clusterColor, () -> colorMode.get() == ColorMode.STATIC && showCluster.get());
         add(blockColor, () -> colorMode.get() == ColorMode.STATIC && showBlocks.get());
+        add(rateLowColor, () -> colorMode.get() == ColorMode.STATIC && rateChunks.get());
+        add(rateMidColor, () -> colorMode.get() == ColorMode.STATIC && rateChunks.get());
+        add(rateHighColor, () -> colorMode.get() == ColorMode.STATIC && rateChunks.get());
+        add(rateMaxColor, () -> colorMode.get() == ColorMode.STATIC && rateChunks.get());
         add(stashColor, () -> colorMode.get() == ColorMode.STATIC);
         add(baseTypeColor, () -> colorMode.get() == ColorMode.STATIC);
         add(farmColor, () -> colorMode.get() == ColorMode.STATIC);
@@ -204,6 +227,7 @@ public class BaseFinder extends BlockEspModule {
         super.onDisable();
         itemCounts.clear();
         sites = List.of();
+        ratings = List.of();
     }
 
     // ---- scanning ----
@@ -325,6 +349,20 @@ public class BaseFinder extends BlockEspModule {
             if (sign && !showBlocks.get()) continue;
             out.add(t);
         }
+        List<ChunkRating> newRatings = new ArrayList<>();
+        if (rateChunks.get()) {
+            for (Acc a : chunks.values()) {
+                double act = activityOf(a.counts);
+                int rating = (int) Math.round(100 * act / (act + 15.0));
+                if (rating < minRating.i()) continue;
+                double avgY = a.sumY / (double) a.n;
+                int x0 = a.cx * 16, z0 = a.cz * 16;
+                AABB slab = new AABB(x0, avgY - 0.6, z0, x0 + 16, avgY - 0.3, z0 + 16);
+                out.add(new Target(BlockPos.containing(x0, avgY, z0), slab, levelOf(rating)));
+                newRatings.add(new ChunkRating(new Vec3(x0 + 8, avgY + 1.5, z0 + 8), rating));
+            }
+        }
+        ratings = newRatings;
         for (Site s : found) {
             int kind = s.raided() ? S_RAIDED : switch (s.type()) {
                 case STASH -> S_STASH;
@@ -411,6 +449,28 @@ public class BaseFinder extends BlockEspModule {
                 group.size(), Integer.bitCount(mask), countText, evidence);
     }
 
+    /** How much player activity one tally of blocks suggests. */
+    private static double activityOf(int[] c) {
+        return 2.0 * c[CONTAINER] + 1.5 * c[HOPPER] + 1.5 * c[FURNACE] + c[REDSTONE] + 2.0 * c[WORK]
+                + 3.0 * c[BED] + 0.3 * c[GLASS] + 0.3 * c[TORCH];
+    }
+
+    private static int levelOf(int rating) {
+        if (rating >= 80) return R_MAX;
+        if (rating >= 60) return R_HIGH;
+        if (rating >= 40) return R_MID;
+        return R_LOW;
+    }
+
+    private int rateColor(int level) {
+        return switch (level) {
+            case R_MAX -> rateMaxColor.get();
+            case R_HIGH -> rateHighColor.get();
+            case R_MID -> rateMidColor.get();
+            default -> rateLowColor.get();
+        };
+    }
+
     private static void addCount(List<String> out, int n, String one, String many) {
         if (n > 0) out.add(n + " " + (n == 1 ? one : many));
     }
@@ -419,6 +479,17 @@ public class BaseFinder extends BlockEspModule {
 
     @Override
     protected void renderExtra(Minecraft mc, Vec3 cam) {
+        if (rateChunks.get() && chunkLabels.get() && !ratings.isEmpty()) {
+            List<ChunkRating> rs = new ArrayList<>(ratings);
+            rs.sort(Comparator.comparingDouble(r -> r.pos().distanceToSqr(cam)));
+            int cn = Math.min(rs.size(), maxChunkLabels.i());
+            for (int i = 0; i < cn; i++) {
+                ChunkRating r = rs.get(i);
+                double d = r.pos().distanceTo(cam);
+                float sc = labelSize.f() * (float) Math.max(1.0, d / 8.0);
+                EspDraw.text(r.pos(), "Base potential " + r.rating() + "%", rateColor(levelOf(r.rating())), sc, throughWalls.get());
+            }
+        }
         if (!labels.get() || sites.isEmpty()) return;
         List<Site> sorted = new ArrayList<>(sites);
         sorted.sort(Comparator.comparingDouble(s -> s.center().distanceToSqr(cam)));
@@ -434,13 +505,14 @@ public class BaseFinder extends BlockEspModule {
 
     @Override
     protected int baseColor(int kind) {
-        if (colorMode.get() != ColorMode.STATIC && kind < S_STASH) return blockColor.get();
+        if (colorMode.get() != ColorMode.STATIC && (kind < S_STASH || kind >= R_LOW)) return blockColor.get();
         return switch (kind) {
             case BUDDING -> buddingColor.get();
             case SMALL -> smallColor.get();
             case MEDIUM -> mediumColor.get();
             case LARGE -> largeColor.get();
             case CLUSTER -> clusterColor.get();
+            case R_LOW, R_MID, R_HIGH, R_MAX -> rateColor(kind);
             case S_STASH -> stashColor.get();
             case S_BASE -> baseTypeColor.get();
             case S_FARM -> farmColor.get();
