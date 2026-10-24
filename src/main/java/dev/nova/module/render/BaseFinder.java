@@ -15,52 +15,60 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * Looks for signs of player activity and flags suspicious chunks.
+ * Finds player sites (stashes, bases, farms) by grouping player-made blocks into clusters.
  *
- * Every player-made block adds to a chunk's "base score". A chunk over the threshold is highlighted:
- *   orange = suspicious, yellow = active base (score at least double the threshold).
- * Damage signs (TNT, fire, loose dropped items) are counted too. A base with enough damage signs is
- * marked red as "likely raided".
+ * Nearby chunks that contain player-made blocks are merged into one site. Each site gets a type guess
+ * (Stash / Base / Farm / Unknown) with a confidence %, shown in an on-screen list, as a marker in the world,
+ * and in a tooltip when you aim at it. Sites with TNT, fire or lots of loose items are tagged "raided?".
  *
- * The client can't see inside chests or know history, so this is a guess from what is visible.
- * Amethyst buds are shown per growth stage: they only grow while their chunk is loaded.
+ * It only sees blocks (not what is inside chests), so every result is an educated guess.
+ * Amethyst buds are also shown by growth stage, since they only grow while their chunk is loaded.
  */
 public class BaseFinder extends BlockEspModule {
     // block kinds
     private static final int BUDDING = 0, SMALL = 1, MEDIUM = 2, LARGE = 3, CLUSTER = 4;
-    private static final int REDSTONE = 5, WORK = 6, BED = 7, GLASS = 8, TORCH = 9, STORAGE = 10, TNT = 11, FIRE = 12;
-    // chunk kinds
-    private static final int C_SUSPICIOUS = 13, C_BASE = 14, C_RAIDED = 15;
+    private static final int CONTAINER = 5, HOPPER = 6, FURNACE = 7, REDSTONE = 8, WORK = 9, BED = 10,
+            GLASS = 11, TORCH = 12, TNT = 13, FIRE = 14;
+    // site marker kinds
+    private static final int S_STASH = 15, S_BASE = 16, S_FARM = 17, S_UNKNOWN = 18, S_RAIDED = 19;
 
-    private static final double[] WEIGHT = new double[16];
+    public enum Type {
+        STASH("Stash"), BASE("Base"), FARM("Farm"), UNKNOWN("Unknown");
+        public final String label;
+        Type(String label) { this.label = label; }
+    }
 
-    static {
-        WEIGHT[REDSTONE] = 1.0;
-        WEIGHT[WORK] = 2.0;
-        WEIGHT[BED] = 3.0;
-        WEIGHT[GLASS] = 0.3;
-        WEIGHT[TORCH] = 0.3;
-        WEIGHT[STORAGE] = 2.0;
+    /** One detected site. */
+    public record Site(Type type, boolean raided, int conf, int score, Vec3 center, int minY, int maxY,
+                       int chunks, int sections, String counts, List<String> evidence) {
+        public String label() {
+            return raided ? type.label + " (raided?)" : type.label;
+        }
     }
 
     private static final Map<Block, Integer> KINDS = new HashMap<>();
 
     static {
+        put(CONTAINER, Blocks.BARREL, Blocks.ENDER_CHEST, Blocks.TRAPPED_CHEST);
+        put(HOPPER, Blocks.HOPPER);
+        put(FURNACE, Blocks.FURNACE, Blocks.BLAST_FURNACE, Blocks.SMOKER);
         put(REDSTONE, Blocks.PISTON, Blocks.STICKY_PISTON, Blocks.OBSERVER, Blocks.REPEATER, Blocks.COMPARATOR,
-                Blocks.REDSTONE_LAMP, Blocks.NOTE_BLOCK, Blocks.HOPPER, Blocks.DROPPER, Blocks.DISPENSER);
-        put(WORK, Blocks.CRAFTING_TABLE, Blocks.FURNACE, Blocks.BLAST_FURNACE, Blocks.SMOKER, Blocks.ANVIL,
-                Blocks.BREWING_STAND, Blocks.ENCHANTING_TABLE, Blocks.BEACON, Blocks.JUKEBOX);
+                Blocks.REDSTONE_LAMP, Blocks.NOTE_BLOCK, Blocks.DROPPER, Blocks.DISPENSER);
+        put(WORK, Blocks.CRAFTING_TABLE, Blocks.ANVIL, Blocks.BREWING_STAND, Blocks.ENCHANTING_TABLE,
+                Blocks.BEACON, Blocks.JUKEBOX);
         put(GLASS, Blocks.GLASS, Blocks.GLASS_PANE, Blocks.TINTED_GLASS);
         put(TORCH, Blocks.TORCH, Blocks.WALL_TORCH, Blocks.SOUL_TORCH, Blocks.SOUL_WALL_TORCH,
                 Blocks.LANTERN, Blocks.SOUL_LANTERN);
-        put(STORAGE, Blocks.BARREL, Blocks.ENDER_CHEST, Blocks.TRAPPED_CHEST);
         put(TNT, Blocks.TNT);
         put(FIRE, Blocks.FIRE, Blocks.SOUL_FIRE);
     }
@@ -69,13 +77,12 @@ public class BaseFinder extends BlockEspModule {
         for (Block b : blocks) KINDS.put(b, kind);
     }
 
-    private record Label(Vec3 pos, String text, int rgb) {}
-
-    private static final class Info {
-        double base;
-        double damage;
-        int minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE;
-        int cx, cz;
+    /** Per-chunk tally used while grouping. */
+    private static final class Acc {
+        final int[] counts = new int[15];
+        int cx, cz, minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE, n, sectionMask;
+        long sumX, sumY, sumZ;
+        int loose;
     }
 
     // amethyst
@@ -85,23 +92,27 @@ public class BaseFinder extends BlockEspModule {
     private final Setting.Bool showLarge = new Setting.Bool("Large Bud (stage 3)", true);
     private final Setting.Bool showCluster = new Setting.Bool("Full Cluster (grown)", true);
 
-    // player-made blocks
+    // what counts as a sign of players
+    private final Setting.Bool useContainers = new Setting.Bool("Chests & Barrels", true);
+    private final Setting.Bool useHoppers = new Setting.Bool("Hoppers", true);
+    private final Setting.Bool useFurnaces = new Setting.Bool("Furnaces", true);
     private final Setting.Bool useRedstone = new Setting.Bool("Redstone & Pistons", true);
     private final Setting.Bool useWork = new Setting.Bool("Workstations", true);
     private final Setting.Bool useBeds = new Setting.Bool("Beds", true);
-    private final Setting.Bool useStorage = new Setting.Bool("Chests & Barrels", true);
     private final Setting.Bool useGlass = new Setting.Bool("Glass", false);
     private final Setting.Bool useTorches = new Setting.Bool("Torches & Lanterns", false);
     private final Setting.Bool useDamage = new Setting.Bool("Detect Raid Damage", true);
     private final Setting.Bool showBlocks = new Setting.Bool("Show Individual Blocks", false);
 
-    // chunk logic
-    private final Setting.Bool chunkBoxes = new Setting.Bool("Highlight Suspicious Chunks", true);
-    private final Setting.Num threshold = new Setting.Num("Suspicion Threshold", 6, 1, 60, 1, " pts");
+    // site detection and display
+    private final Setting.Num minScore = new Setting.Num("Min Site Score", 8, 2, 80, 1, " pts");
     private final Setting.Num raidSensitivity = new Setting.Num("Raid Sensitivity (lower = more)", 5, 1, 30, 1, " pts");
-    private final Setting.Bool labels = new Setting.Bool("Show Labels", true);
+    private final Setting.Bool panel = new Setting.Bool("Show List Panel", true);
+    private final Setting.Num panelEntries = new Setting.Num("List Entries", 5, 1, 10, 1, "");
+    private final Setting.Bool tooltip = new Setting.Bool("Show Aim Tooltip", true);
+    private final Setting.Bool labels = new Setting.Bool("Show World Labels", true);
     private final Setting.Num labelSize = new Setting.Num("Label Size", 1.5, 0.5, 8, 0.5, "x");
-    private final Setting.Num maxLabels = new Setting.Num("Max Labels", 12, 1, 60, 1, "");
+    private final Setting.Num maxLabels = new Setting.Num("Max Labels", 8, 1, 40, 1, "");
 
     // colors
     private final Setting.Col buddingColor = new Setting.Col("Budding Color", 0x9D4EDD);
@@ -109,37 +120,43 @@ public class BaseFinder extends BlockEspModule {
     private final Setting.Col mediumColor = new Setting.Col("Medium Bud Color", 0xA06BFF);
     private final Setting.Col largeColor = new Setting.Col("Large Bud Color", 0xD36BFF);
     private final Setting.Col clusterColor = new Setting.Col("Cluster Color", 0xFF6BE6);
-    private final Setting.Col blockColor = new Setting.Col("Player Block Color", 0xFFD83B);
-    private final Setting.Col suspiciousColor = new Setting.Col("Suspicious Chunk Color", 0xFF9A3B);
-    private final Setting.Col baseColorSetting = new Setting.Col("Active Base Color", 0xFFE74D);
-    private final Setting.Col raidedColor = new Setting.Col("Likely Raided Color", 0xFF3B3B);
+    private final Setting.Col blockColor = new Setting.Col("Block Color", 0xFFD83B);
+    private final Setting.Col stashColor = new Setting.Col("Stash Color", 0xFF9A3B);
+    private final Setting.Col baseTypeColor = new Setting.Col("Base Color", 0xFFE74D);
+    private final Setting.Col farmColor = new Setting.Col("Farm Color", 0x6BCB77);
+    private final Setting.Col unknownColor = new Setting.Col("Unknown Color", 0x9AA0A6);
+    private final Setting.Col raidedColor = new Setting.Col("Raided Color", 0xFF3B3B);
 
     private final Map<Long, Integer> itemCounts = new HashMap<>();
-    private List<Label> labelList = List.of();
+    private List<Site> sites = List.of();
     private int itemTick;
 
     public BaseFinder() {
-        super("Base Finder", "Flags suspicious chunks and guesses if they were raided. Shows amethyst growth.");
+        super("Base Finder", "Finds stashes, bases and farms and guesses what they are.");
 
         add(showBudding);
         add(showSmall);
         add(showMedium);
         add(showLarge);
         add(showCluster);
+        add(useContainers);
+        add(useHoppers);
+        add(useFurnaces);
         add(useRedstone);
         add(useWork);
         add(useBeds);
-        add(useStorage);
         add(useGlass);
         add(useTorches);
         add(useDamage);
         add(showBlocks);
-        add(chunkBoxes);
-        add(threshold, chunkBoxes::get);
-        add(raidSensitivity, () -> chunkBoxes.get() && useDamage.get());
-        add(labels, chunkBoxes::get);
-        add(labelSize, () -> chunkBoxes.get() && labels.get());
-        add(maxLabels, () -> chunkBoxes.get() && labels.get());
+        add(minScore);
+        add(raidSensitivity, useDamage::get);
+        add(panel);
+        add(panelEntries, panel::get);
+        add(tooltip);
+        add(labels);
+        add(labelSize, labels::get);
+        add(maxLabels, labels::get);
 
         addAppearanceSettings();
 
@@ -149,25 +166,47 @@ public class BaseFinder extends BlockEspModule {
         add(largeColor, () -> colorMode.get() == ColorMode.STATIC && showLarge.get());
         add(clusterColor, () -> colorMode.get() == ColorMode.STATIC && showCluster.get());
         add(blockColor, () -> colorMode.get() == ColorMode.STATIC && showBlocks.get());
-        add(suspiciousColor, () -> colorMode.get() == ColorMode.STATIC && chunkBoxes.get());
-        add(baseColorSetting, () -> colorMode.get() == ColorMode.STATIC && chunkBoxes.get());
-        add(raidedColor, () -> colorMode.get() == ColorMode.STATIC && chunkBoxes.get());
+        add(stashColor, () -> colorMode.get() == ColorMode.STATIC);
+        add(baseTypeColor, () -> colorMode.get() == ColorMode.STATIC);
+        add(farmColor, () -> colorMode.get() == ColorMode.STATIC);
+        add(unknownColor, () -> colorMode.get() == ColorMode.STATIC);
+        add(raidedColor, () -> colorMode.get() == ColorMode.STATIC && useDamage.get());
 
         addScanSettings();
         addBehaviorSettings();
 
         range.set(256.0);
-        mode.set(EspMode.OUTLINE);
+        mode.set(EspMode.BOTH);
+        fillOpacity.set(35.0);
         distanceFade.set(false);
-        lineWidth.set(3.0);
+        lineWidth.set(2.5);
+    }
+
+    // ---- accessors for the on-screen overlay ----
+
+    public List<Site> sites() { return sites; }
+    public boolean panelOn() { return panel.get(); }
+    public int panelEntries() { return panelEntries.i(); }
+    public boolean tooltipOn() { return tooltip.get(); }
+
+    public int colorOf(Site s) {
+        if (s.raided()) return raidedColor.get();
+        return switch (s.type()) {
+            case STASH -> stashColor.get();
+            case BASE -> baseTypeColor.get();
+            case FARM -> farmColor.get();
+            case UNKNOWN -> unknownColor.get();
+        };
     }
 
     @Override
     protected void onDisable() {
         super.onDisable();
         itemCounts.clear();
-        labelList = List.of();
+        sites = List.of();
     }
+
+    // ---- scanning ----
 
     @Override
     protected int classify(BlockState state) {
@@ -180,17 +219,19 @@ public class BaseFinder extends BlockEspModule {
 
         int kind;
         if (b instanceof BedBlock) kind = BED;
-        else if (b instanceof ChestBlock || b instanceof ShulkerBoxBlock) kind = STORAGE;
+        else if (b instanceof ChestBlock || b instanceof ShulkerBoxBlock) kind = CONTAINER;
         else {
             Integer k = KINDS.get(b);
             if (k == null) return -1;
             kind = k;
         }
         boolean on = switch (kind) {
+            case CONTAINER -> useContainers.get();
+            case HOPPER -> useHoppers.get();
+            case FURNACE -> useFurnaces.get();
             case REDSTONE -> useRedstone.get();
             case WORK -> useWork.get();
             case BED -> useBeds.get();
-            case STORAGE -> useStorage.get();
             case GLASS -> useGlass.get();
             case TORCH -> useTorches.get();
             case TNT, FIRE -> useDamage.get();
@@ -207,7 +248,7 @@ public class BaseFinder extends BlockEspModule {
     public void onTick(Minecraft mc) {
         super.onTick(mc);
         if (mc.level == null || mc.player == null) return;
-        if (!useDamage.get() || !chunkBoxes.get()) {
+        if (!useDamage.get()) {
             itemCounts.clear();
             return;
         }
@@ -221,93 +262,190 @@ public class BaseFinder extends BlockEspModule {
         }
     }
 
+    // ---- grouping blocks into sites ----
+
     @Override
     protected List<Target> postProcess(List<Target> all) {
-        Map<Long, Info> chunks = new HashMap<>();
+        // 1. tally signs per chunk
+        Map<Long, Acc> chunks = new HashMap<>();
         for (Target t : all) {
             int k = t.kind();
-            if (k < REDSTONE || k > FIRE) continue;
+            if (k < CONTAINER || k > FIRE) continue;
             BlockPos p = t.pos();
             int cx = p.getX() >> 4, cz = p.getZ() >> 4;
-            Info info = chunks.computeIfAbsent(chunkKey(cx, cz), key -> {
-                Info i = new Info();
-                i.cx = cx;
-                i.cz = cz;
-                return i;
+            Acc a = chunks.computeIfAbsent(chunkKey(cx, cz), key -> {
+                Acc n = new Acc();
+                n.cx = cx;
+                n.cz = cz;
+                return n;
             });
-            if (k == TNT) info.damage += 3;
-            else if (k == FIRE) info.damage += 2;
-            else info.base += WEIGHT[k];
-            info.minY = Math.min(info.minY, p.getY());
-            info.maxY = Math.max(info.maxY, p.getY());
+            a.counts[k]++;
+            a.n++;
+            a.sumX += p.getX();
+            a.sumY += p.getY();
+            a.sumZ += p.getZ();
+            a.minY = Math.min(a.minY, p.getY());
+            a.maxY = Math.max(a.maxY, p.getY());
+            int section = Math.max(0, Math.min(31, (p.getY() >> 4) + 4));
+            a.sectionMask |= 1 << section;
+        }
+        for (Map.Entry<Long, Acc> e : chunks.entrySet()) {
+            Integer loose = itemCounts.get(e.getKey());
+            if (loose != null) e.getValue().loose = loose;
         }
 
+        // 2. merge touching chunks into groups
+        List<Site> found = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        for (Map.Entry<Long, Acc> start : chunks.entrySet()) {
+            if (!seen.add(start.getKey())) continue;
+            List<Acc> group = new ArrayList<>();
+            ArrayDeque<Acc> queue = new ArrayDeque<>();
+            queue.add(start.getValue());
+            while (!queue.isEmpty()) {
+                Acc a = queue.poll();
+                group.add(a);
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        long key = chunkKey(a.cx + dx, a.cz + dz);
+                        Acc next = chunks.get(key);
+                        if (next != null && seen.add(key)) queue.add(next);
+                    }
+                }
+            }
+            Site site = evaluate(group);
+            if (site != null) found.add(site);
+        }
+        sites = found;
+
+        // 3. what gets drawn: amethyst, optional single blocks, and one marker per site
         List<Target> out = new ArrayList<>();
         for (Target t : all) {
-            boolean madeBlock = t.kind() >= REDSTONE && t.kind() <= FIRE;
-            if (madeBlock && !showBlocks.get()) continue;
+            boolean sign = t.kind() >= CONTAINER && t.kind() <= FIRE;
+            if (sign && !showBlocks.get()) continue;
             out.add(t);
         }
-
-        List<Label> newLabels = new ArrayList<>();
-        if (chunkBoxes.get()) {
-            for (Map.Entry<Long, Info> en : chunks.entrySet()) {
-                Info i = en.getValue();
-                Integer loose = itemCounts.get(en.getKey());
-                if (loose != null) i.damage += loose;
-                if (i.base < threshold.d()) continue;
-
-                int kind;
-                String text;
-                int score = (int) Math.round(i.base);
-                int dmg = (int) Math.round(i.damage);
-                if (useDamage.get() && i.damage >= raidSensitivity.d()) {
-                    kind = C_RAIDED;
-                    text = "LIKELY RAIDED (base " + score + ", damage " + dmg + ")";
-                } else if (i.base >= threshold.d() * 2) {
-                    kind = C_BASE;
-                    text = "Active base, looks intact (" + score + ")";
-                } else {
-                    kind = C_SUSPICIOUS;
-                    text = "Suspicious (" + score + ")";
-                }
-
-                int x0 = i.cx * 16, z0 = i.cz * 16;
-                AABB box = new AABB(x0, i.minY, z0, x0 + 16, i.maxY + 1, z0 + 16);
-                out.add(new Target(new BlockPos(x0, i.minY, z0), box, kind));
-                newLabels.add(new Label(new Vec3(x0 + 8, i.maxY + 4, z0 + 8), text, baseColor(kind)));
-            }
+        for (Site s : found) {
+            int kind = s.raided() ? S_RAIDED : switch (s.type()) {
+                case STASH -> S_STASH;
+                case BASE -> S_BASE;
+                case FARM -> S_FARM;
+                case UNKNOWN -> S_UNKNOWN;
+            };
+            Vec3 c = s.center();
+            AABB box = new AABB(c.x - 0.45, c.y - 0.45, c.z - 0.45, c.x + 0.45, c.y + 0.45, c.z + 0.45);
+            out.add(new Target(BlockPos.containing(c), box, kind));
         }
-        labelList = newLabels;
         return out;
     }
 
+    private Site evaluate(List<Acc> group) {
+        int[] c = new int[15];
+        long sumX = 0, sumY = 0, sumZ = 0, n = 0;
+        int minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE, mask = 0, loose = 0;
+        for (Acc a : group) {
+            for (int i = 0; i < c.length; i++) c[i] += a.counts[i];
+            sumX += a.sumX;
+            sumY += a.sumY;
+            sumZ += a.sumZ;
+            n += a.n;
+            minY = Math.min(minY, a.minY);
+            maxY = Math.max(maxY, a.maxY);
+            mask |= a.sectionMask;
+            loose += a.loose;
+        }
+        if (n == 0) return null;
+
+        int containers = c[CONTAINER], hoppers = c[HOPPER], furnaces = c[FURNACE], redstone = c[REDSTONE];
+        int work = c[WORK], beds = c[BED], glass = c[GLASS], torches = c[TORCH];
+
+        double activity = 2.0 * containers + 1.5 * hoppers + 1.5 * furnaces + redstone + 2.0 * work
+                + 3.0 * beds + 0.3 * glass + 0.3 * torches;
+        if (activity < minScore.d()) return null;
+
+        double avgY = sumY / (double) n;
+        double stash = Math.max(0, 2.5 * containers + hoppers + (avgY < 30 ? 6 : 0) - 3.0 * beds - 1.5 * work - furnaces);
+        double base = 4.0 * beds + 2.0 * work + 1.5 * furnaces + 0.5 * containers + 0.3 * glass + 0.3 * torches;
+        double farm = (hoppers + redstone >= 6) ? Math.max(0, 2.0 * hoppers + 1.5 * redstone - 0.5 * containers) : 0;
+
+        double[] scores = {stash, base, farm};
+        int bestIdx = 0;
+        for (int i = 1; i < scores.length; i++) if (scores[i] > scores[bestIdx]) bestIdx = i;
+        double s1 = scores[bestIdx], s2 = 0;
+        for (int i = 0; i < scores.length; i++) if (i != bestIdx) s2 = Math.max(s2, scores[i]);
+
+        Type type;
+        int conf;
+        if (s1 < 4) {
+            type = Type.UNKNOWN;
+            conf = (int) Math.max(10, Math.min(50, Math.round(100 * activity / (activity + 30))));
+        } else {
+            type = bestIdx == 0 ? Type.STASH : bestIdx == 1 ? Type.BASE : Type.FARM;
+            conf = (int) Math.min(95, Math.round(100 * s1 / (s1 + s2 + 6)));
+            if (conf < 40) type = Type.UNKNOWN;
+        }
+
+        double damage = 3.0 * c[TNT] + 2.0 * c[FIRE] + loose;
+        boolean raided = useDamage.get() && damage >= raidSensitivity.d();
+
+        List<String> counts = new ArrayList<>();
+        addCount(counts, containers, "container", "containers");
+        addCount(counts, hoppers, "hopper", "hoppers");
+        addCount(counts, furnaces, "furnace", "furnaces");
+        addCount(counts, beds, "bed", "beds");
+        addCount(counts, work, "workstation", "workstations");
+        addCount(counts, redstone, "redstone part", "redstone parts");
+        String countText = counts.isEmpty() ? "no clear signs" : String.join(", ", counts.subList(0, Math.min(3, counts.size())));
+
+        List<String> evidence = new ArrayList<>();
+        switch (type) {
+            case STASH -> evidence.add(avgY < 30 ? "Lots of storage, deep underground" : "Lots of storage, little living space");
+            case BASE -> evidence.add("Beds and workstations: lived in");
+            case FARM -> evidence.add("Hoppers and redstone: likely a farm");
+            case UNKNOWN -> evidence.add("Not enough clear evidence");
+        }
+        if (raided) evidence.add("Damage signs nearby: may be raided");
+
+        Vec3 center = new Vec3(sumX / (double) n + 0.5, sumY / (double) n + 0.5, sumZ / (double) n + 0.5);
+        return new Site(type, raided, conf, (int) Math.round(activity), center, minY, maxY,
+                group.size(), Integer.bitCount(mask), countText, evidence);
+    }
+
+    private static void addCount(List<String> out, int n, String one, String many) {
+        if (n > 0) out.add(n + " " + (n == 1 ? one : many));
+    }
+
+    // ---- world labels ----
+
     @Override
     protected void renderExtra(Minecraft mc, Vec3 cam) {
-        if (!chunkBoxes.get() || !labels.get() || labelList.isEmpty()) return;
-        List<Label> sorted = new ArrayList<>(labelList);
-        sorted.sort(Comparator.comparingDouble(l -> l.pos().distanceToSqr(cam)));
+        if (!labels.get() || sites.isEmpty()) return;
+        List<Site> sorted = new ArrayList<>(sites);
+        sorted.sort(Comparator.comparingDouble(s -> s.center().distanceToSqr(cam)));
         int n = Math.min(sorted.size(), maxLabels.i());
         for (int i = 0; i < n; i++) {
-            Label l = sorted.get(i);
-            double dist = l.pos().distanceTo(cam);
+            Site s = sorted.get(i);
+            double dist = s.center().distanceTo(cam);
             float scale = labelSize.f() * (float) Math.max(1.0, dist / 8.0);
-            EspDraw.text(l.pos(), l.text(), l.rgb(), scale, throughWalls.get());
+            String text = s.label() + " " + s.conf() + "% " + Math.round(dist) + "m";
+            EspDraw.text(s.center().add(0, 1.3, 0), text, colorOf(s), scale, throughWalls.get());
         }
     }
 
     @Override
     protected int baseColor(int kind) {
-        if (colorMode.get() != ColorMode.STATIC && kind < C_SUSPICIOUS) return blockColor.get();
+        if (colorMode.get() != ColorMode.STATIC && kind < S_STASH) return blockColor.get();
         return switch (kind) {
             case BUDDING -> buddingColor.get();
             case SMALL -> smallColor.get();
             case MEDIUM -> mediumColor.get();
             case LARGE -> largeColor.get();
             case CLUSTER -> clusterColor.get();
-            case C_SUSPICIOUS -> suspiciousColor.get();
-            case C_BASE -> baseColorSetting.get();
-            case C_RAIDED, TNT, FIRE -> raidedColor.get();
+            case S_STASH -> stashColor.get();
+            case S_BASE -> baseTypeColor.get();
+            case S_FARM -> farmColor.get();
+            case S_UNKNOWN -> unknownColor.get();
+            case S_RAIDED, TNT, FIRE -> raidedColor.get();
             default -> blockColor.get();
         };
     }
