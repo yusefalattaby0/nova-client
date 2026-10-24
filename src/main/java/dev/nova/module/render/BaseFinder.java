@@ -63,7 +63,7 @@ public class BaseFinder extends BlockEspModule {
     private static final Map<Block, Integer> KINDS = new HashMap<>();
 
     static {
-        put(CONTAINER, Blocks.BARREL, Blocks.ENDER_CHEST, Blocks.TRAPPED_CHEST);
+        put(CONTAINER, Blocks.BARREL, Blocks.TRAPPED_CHEST);
         put(HOPPER, Blocks.HOPPER);
         put(FURNACE, Blocks.FURNACE, Blocks.BLAST_FURNACE, Blocks.SMOKER);
         put(REDSTONE, Blocks.PISTON, Blocks.STICKY_PISTON, Blocks.OBSERVER, Blocks.REPEATER, Blocks.COMPARATOR,
@@ -522,3 +522,4 @@ public class BaseFinder extends BlockEspModule {
         };
     }
 }
+f
