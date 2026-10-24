@@ -26,7 +26,7 @@ public final class BaseHud {
 
     public static void render(GuiGraphicsExtractor g, DeltaTracker dt) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.level == null || mc.options.hideGui) return;
+        if (mc.player == null || mc.level == null) return;
         BaseFinder bf = ModuleManager.get(BaseFinder.class);
         if (bf == null || !bf.enabled()) return;
 
