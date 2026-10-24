@@ -12,13 +12,6 @@ import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
-/**
- * Detached Freecam.
- *
- * Mouse look is transferred from the local player to the camera entity.
- * Movement moves the detached camera while the real player stays in place.
- * Attacking, using items and picking blocks are disabled while active.
- */
 public class Freecam extends Module {
     private final Setting.Num speed =
             add(new Setting.Num("Speed", 12, 1, 60, 1, " b/s"));
@@ -115,27 +108,23 @@ public class Freecam extends Module {
     }
 
     /**
-     * Prevent interactions while the detached camera is active.
+     * Called by the mouse mixin instead of turning the real player.
+     * Returns false when the detached camera is not active.
      */
-    @Override
-    public void onPreTick(Minecraft mc) {
-        if (cam == null) {
-            return;
+    public boolean turnCamera(double deltaYaw, double deltaPitch) {
+        if (cam == null || !enabled()) {
+            return false;
         }
 
-        Options o = mc.options;
+        cam.turn(deltaYaw, deltaPitch);
 
-        o.keyAttack.setDown(false);
-        o.keyUse.setDown(false);
+        camYaw = cam.getYRot();
+        camPitch = Mth.clamp(cam.getXRot(), -90.0f, 90.0f);
 
-        while (o.keyAttack.consumeClick()) {
-        }
+        cam.setYRot(camYaw);
+        cam.setXRot(camPitch);
 
-        while (o.keyUse.consumeClick()) {
-        }
-
-        while (o.keyPickItem.consumeClick()) {
-        }
+        return true;
     }
 
     @Override
@@ -145,13 +134,6 @@ public class Freecam extends Module {
         }
     }
 
-    /**
-     * Minecraft mouse input may update the local player's rotation
-     * instead of the detached camera's rotation.
-     *
-     * Capture that updated rotation before mirroring the camera view
-     * back onto the local player.
-     */
     @Override
     public void onFrame(Minecraft mc) {
         if (cam == null) {
@@ -165,14 +147,14 @@ public class Freecam extends Module {
 
         LocalPlayer p = mc.player;
 
-        // Keep the detached camera active.
         mc.setCameraEntity(cam);
 
-        // FIX: capture the mouse-updated rotation from the local player.
-        camYaw = p.getYRot();
-        camPitch = Mth.clamp(p.getXRot(), -90.0f, 90.0f);
+        // Read rotation from the camera only; never feed player rotation
+        // back into the camera.
+        camYaw = cam.getYRot();
+        camPitch = Mth.clamp(cam.getXRot(), -90.0f, 90.0f);
 
-        // Keep the first-person view and held items aligned with the camera.
+        // Keep first-person held items aligned with the detached view.
         p.setYRot(camYaw);
         p.setXRot(camPitch);
         p.yRotO = camYaw;
@@ -180,20 +162,17 @@ public class Freecam extends Module {
         p.setYHeadRot(camYaw);
         p.yHeadRotO = camYaw;
 
-        // Keep the real player's body facing its original direction.
+        // Keep the real player's visible body facing its original direction.
         p.setYBodyRot(savedYaw);
         p.yBodyRotO = savedYaw;
 
         long now = System.nanoTime();
-
         double dt = Math.min(
                 0.1,
                 Math.max(0.0, (now - lastNanos) / 1.0e9)
         );
-
         lastNanos = now;
 
-        // Camera movement is disabled while a screen is open.
         if (mc.gui.screen() == null) {
             Options o = mc.options;
 
@@ -251,20 +230,11 @@ public class Freecam extends Module {
             return;
         }
 
-        // ex, ey and ez represent the camera's eye position.
-        cam.setPos(
-                ex,
-                ey - cam.getEyeHeight(),
-                ez
-        );
-
+        cam.setPos(ex, ey - cam.getEyeHeight(), ez);
         cam.setYRot(camYaw);
         cam.setXRot(camPitch);
-
         cam.setYHeadRot(camYaw);
         cam.setYBodyRot(camYaw);
-
-        // Avoid interpolation lag between camera positions.
         cam.setOldPosAndRot();
 
         cam.yHeadRotO = camYaw;
@@ -277,8 +247,10 @@ public class Freecam extends Module {
 
         p.yRotO = savedYaw;
         p.xRotO = savedPitch;
+
         p.setYHeadRot(savedYaw);
         p.yHeadRotO = savedYaw;
+
         p.setYBodyRot(savedYaw);
         p.yBodyRotO = savedYaw;
     }
