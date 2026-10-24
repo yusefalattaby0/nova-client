@@ -18,8 +18,9 @@ import net.minecraft.world.phys.Vec3;
  *
  * How it works, in plain terms:
  *  - the player's movement input is swapped for an empty one, so WASD does not move the player
- *  - the camera looks wherever the mouse turns (the player turns with it; your original look direction is restored on exit)
- *  - clicks (attack / use / pick block) are swallowed so you can't interact from the camera
+ *  - the camera controls the view and first-person hand orientation
+ *  - the real player's body yaw is held at the original direction for a stable third-person model
+ *  - clicks (attack / use / pick block) are swallowed so interactions cannot happen from the camera
  */
 public class Freecam extends Module {
     private final Setting.Num speed = add(new Setting.Num("Speed", 12, 1, 60, 1, " b/s"));
@@ -117,14 +118,20 @@ public class Freecam extends Module {
         // keep the game looking through our camera (cheap; guards against anything resetting it)
         mc.setCameraEntity(cam);
 
-        // Mouse look. The player's rotation is the single source of truth: the mouse normally turns the
-        // player, so we read it from there. If the game turned the camera entity instead, fold that in too.
-        float newYaw = p.getYRot() + (cam.getYRot() - camYaw);
-        float newPitch = Mth.clamp(p.getXRot() + (cam.getXRot() - camPitch), -90f, 90f);
-        p.setYRot(newYaw);
-        p.setXRot(newPitch);
-        camYaw = newYaw;
-        camPitch = newPitch;
+        // Read mouse look from the detached camera. Vanilla first-person hand rendering
+        // uses the local player rotation in several transforms, so mirror the camera's
+        // view rotation onto the local player while preserving the body's original yaw.
+        // This keeps held items aligned with the view without turning the visible torso.
+        camYaw = cam.getYRot();
+        camPitch = Mth.clamp(cam.getXRot(), -90f, 90f);
+        p.setYRot(camYaw);
+        p.setXRot(camPitch);
+        p.yRotO = camYaw;
+        p.xRotO = camPitch;
+        p.setYHeadRot(camYaw);
+        p.yHeadRotO = camYaw;
+        p.setYBodyRot(savedYaw);
+        p.yBodyRotO = savedYaw;
 
         long now = System.nanoTime();
         double dt = Math.min(0.1, (now - lastNanos) / 1.0e9);
