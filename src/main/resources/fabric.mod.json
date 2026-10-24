@@ -1,3 +1,4 @@
+
 {
   "schemaVersion": 1,
   "id": "nova",
@@ -10,6 +11,9 @@
   "entrypoints": {
     "client": ["dev.nova.NovaClient"]
   },
+  "mixins": [
+    "nova.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.19.3",
     "minecraft": "~26.2",
