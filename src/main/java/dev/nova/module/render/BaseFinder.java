@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -63,6 +64,7 @@ public class BaseFinder extends BlockEspModule {
     private static final Map<Block, Integer> KINDS = new HashMap<>();
 
     static {
+        // Ender chests are personal utility blocks, not evidence of shared storage/base activity.
         put(CONTAINER, Blocks.BARREL, Blocks.TRAPPED_CHEST);
         put(HOPPER, Blocks.HOPPER);
         put(FURNACE, Blocks.FURNACE, Blocks.BLAST_FURNACE, Blocks.SMOKER);
@@ -354,8 +356,18 @@ public class BaseFinder extends BlockEspModule {
             for (Acc a : chunks.values()) {
                 double act = activityOf(a.counts);
                 int rating = (int) Math.round(100 * act / (act + 15.0));
-                if (rating < minRating.i()) continue;
+                // Surface-level activity is common for paths, villages, and ordinary builds;
+                // reduce its suspicion score rather than treating it like a hidden base.
                 double avgY = a.sumY / (double) a.n;
+                Minecraft mc = Minecraft.getInstance();
+                if (mc.level != null) {
+                    int surface = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                            a.cx * 16 + 8, a.cz * 16 + 8);
+                    double depth = surface - avgY;
+                    if (depth < 8) rating = (int) Math.round(rating * 0.45);
+                    else if (depth < 16) rating = (int) Math.round(rating * 0.72);
+                }
+                if (rating < minRating.i()) continue;
                 int x0 = a.cx * 16, z0 = a.cz * 16;
                 AABB slab = new AABB(x0, avgY - 0.6, z0, x0 + 16, avgY - 0.3, z0 + 16);
                 out.add(new Target(BlockPos.containing(x0, avgY, z0), slab, levelOf(rating)));
@@ -522,4 +534,3 @@ public class BaseFinder extends BlockEspModule {
         };
     }
 }
-f
