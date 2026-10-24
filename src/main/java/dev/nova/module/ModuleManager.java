@@ -3,6 +3,7 @@ package dev.nova.module;
 import dev.nova.module.client.GuiSettings;
 import dev.nova.module.combat.AutoTotem;
 import dev.nova.module.combat.FastCrystal;
+import dev.nova.module.render.AncientDebrisFinder;
 import dev.nova.module.render.BaseFinder;
 import dev.nova.module.render.EntityEsp;
 import dev.nova.module.render.EspModule;
@@ -26,6 +27,7 @@ public final class ModuleManager {
         register(new StorageFinder());
         register(new EntityEsp());
         register(new BaseFinder());
+        register(new AncientDebrisFinder());
         register(new SpawnerFinder());
         register(new OreFinder());
         register(new RespawnAnchorFinder());
