@@ -1,11 +1,23 @@
 
 {
-  "required": true,
-  "package": "dev.nova.mixin",
-  "client": [
-    "MouseHandlerMixin"
+  "schemaVersion": 1,
+  "id": "nova",
+  "version": "${version}",
+  "name": "Nova",
+  "description": "Nova Minecraft client",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "dev.nova.NovaClient"
+    ]
+  },
+  "mixins": [
+    "nova.mixins.json"
   ],
-  "injectors": {
-    "defaultRequire": 1
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "26.2",
+    "java": ">=25",
+    "fabric-api": "*"
   }
 }
