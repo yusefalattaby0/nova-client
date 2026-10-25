@@ -1,5 +1,6 @@
 package dev.nova.module.render;
 
+import com.mojang.authlib.GameProfile;
 import dev.nova.module.Module;
 import dev.nova.setting.Setting;
 import net.minecraft.client.Minecraft;
@@ -10,6 +11,8 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.UUID;
 
 public class Freecam extends Module {
 
@@ -39,7 +42,7 @@ public class Freecam extends Module {
     public Freecam() {
         super(
                 "Freecam",
-                "Fly a detached camera. Your player stays put.",
+                "Fly a detached camera while your player stays put.",
                 Category.RENDER
         );
     }
@@ -47,6 +50,7 @@ public class Freecam extends Module {
     @Override
     protected void onEnable() {
         Minecraft mc = Minecraft.getInstance();
+
         LocalPlayer player = mc.player;
         ClientLevel clientLevel = mc.level;
 
@@ -70,13 +74,18 @@ public class Freecam extends Module {
         ey = eye.y;
         ez = eye.z;
 
-        cam = new RemotePlayer(
-                clientLevel,
-                player.getGameProfile()
+        // Give the camera a different profile so it is not confused
+        // with the actual player.
+        GameProfile cameraProfile = new GameProfile(
+                UUID.randomUUID(),
+                "NovaFreecam"
         );
+
+        cam = new RemotePlayer(clientLevel, cameraProfile);
 
         placeCamera();
 
+        // Freeze normal player movement without moving the player.
         savedInput = player.input;
         player.input = new ClientInput();
 
@@ -108,24 +117,24 @@ public class Freecam extends Module {
     }
 
     private boolean stillValid(Minecraft mc) {
-        return mc.player == owner
-                && mc.level == level
-                && owner != null;
+        return owner != null
+                && mc.player == owner
+                && mc.level == level;
     }
 
     /**
-     * Called by MouseHandlerMixin to rotate the detached camera
-     * when the player moves the mouse.
+     * Rotate only the free camera.
+     * The 0.15 multiplier matches normal Minecraft mouse rotation scaling.
      */
     public void turnCamera(double deltaYaw, double deltaPitch) {
         if (cam == null) {
             return;
         }
 
-        camYaw += (float) deltaYaw;
+        camYaw += (float) (deltaYaw * 0.15);
 
         camPitch = Mth.clamp(
-                camPitch + (float) deltaPitch,
+                camPitch + (float) (deltaPitch * 0.15),
                 -90.0f,
                 90.0f
         );
@@ -134,9 +143,21 @@ public class Freecam extends Module {
     }
 
     /**
-     * Swallow attack and use inputs while freecam is active.
-     * The mouse mixin also cancels the original click event.
+     * These methods let the first-person hand renderer use
+     * the free camera's view instead of the real player's view.
      */
+    public float getCameraViewXRot(float partialTick) {
+        return cam == null
+                ? savedPitch
+                : cam.getViewXRot(partialTick);
+    }
+
+    public float getCameraViewYRot(float partialTick) {
+        return cam == null
+                ? savedYaw
+                : cam.getViewYRot(partialTick);
+    }
+
     @Override
     public void onPreTick(Minecraft mc) {
         if (cam == null) {
@@ -165,9 +186,6 @@ public class Freecam extends Module {
         }
     }
 
-    /**
-     * Move the detached camera without moving the real player.
-     */
     @Override
     public void onFrame(Minecraft mc) {
         if (cam == null) {
@@ -179,12 +197,9 @@ public class Freecam extends Module {
             return;
         }
 
-        LocalPlayer player = mc.player;
-
-        // Keep the view attached to the freecam entity.
+        // Keep the camera detached from the real player.
         mc.setCameraEntity(cam);
 
-        // Synchronize view and held-item rotation with the camera.
         camYaw = cam.getYRot();
         camPitch = Mth.clamp(
                 cam.getXRot(),
@@ -192,18 +207,9 @@ public class Freecam extends Module {
                 90.0f
         );
 
-        player.setYRot(camYaw);
-        player.setXRot(camPitch);
-
-        player.yRotO = camYaw;
-        player.xRotO = camPitch;
-
-        player.setYHeadRot(camYaw);
-        player.yHeadRotO = camYaw;
-
-        // Keep the player's body facing its original direction.
-        player.setYBodyRot(savedYaw);
-        player.yBodyRotO = savedYaw;
+        // IMPORTANT:
+        // Do not copy the camera's rotation onto the real player.
+        // The real player's position and rotation should stay put.
 
         long now = System.nanoTime();
 
@@ -265,9 +271,6 @@ public class Freecam extends Module {
         placeCamera();
     }
 
-    /**
-     * Position and rotate the detached camera.
-     */
     private void placeCamera() {
         if (cam == null) {
             return;
