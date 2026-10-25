@@ -1,4 +1,3 @@
-
 package dev.nova.module.render;
 
 import dev.nova.module.Module;
@@ -13,6 +12,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 public class Freecam extends Module {
+
     private final Setting.Num speed =
             add(new Setting.Num("Speed", 12, 1, 60, 1, " b/s"));
 
@@ -26,6 +26,7 @@ public class Freecam extends Module {
 
     private float savedYaw;
     private float savedPitch;
+
     private float camYaw;
     private float camPitch;
 
@@ -46,35 +47,41 @@ public class Freecam extends Module {
     @Override
     protected void onEnable() {
         Minecraft mc = Minecraft.getInstance();
-        LocalPlayer p = mc.player;
-        ClientLevel lvl = mc.level;
+        LocalPlayer player = mc.player;
+        ClientLevel clientLevel = mc.level;
 
-        if (p == null || lvl == null) {
+        if (player == null || clientLevel == null) {
             setEnabled(false);
             return;
         }
 
-        owner = p;
-        level = lvl;
+        owner = player;
+        level = clientLevel;
 
-        savedYaw = p.getYRot();
-        savedPitch = p.getXRot();
+        savedYaw = player.getYRot();
+        savedPitch = player.getXRot();
 
         camYaw = savedYaw;
         camPitch = savedPitch;
 
-        Vec3 eye = p.getEyePosition();
+        Vec3 eye = player.getEyePosition();
+
         ex = eye.x;
         ey = eye.y;
         ez = eye.z;
 
-        cam = new RemotePlayer(lvl, p.getGameProfile());
+        cam = new RemotePlayer(
+                clientLevel,
+                player.getGameProfile()
+        );
+
         placeCamera();
 
-        savedInput = p.input;
-        p.input = new ClientInput();
+        savedInput = player.input;
+        player.input = new ClientInput();
 
         mc.setCameraEntity(cam);
+
         lastNanos = System.nanoTime();
     }
 
@@ -98,33 +105,57 @@ public class Freecam extends Module {
         owner = null;
         level = null;
         savedInput = null;
-        lastNanos = 0L;
     }
 
     private boolean stillValid(Minecraft mc) {
-        return owner != null
-                && mc.player == owner
-                && mc.level == level;
+        return mc.player == owner
+                && mc.level == level
+                && owner != null;
     }
 
     /**
-     * Called by the mouse mixin instead of turning the real player.
-     * Returns false when the detached camera is not active.
+     * Called by MouseHandlerMixin to rotate the detached camera
+     * when the player moves the mouse.
      */
-    public boolean turnCamera(double deltaYaw, double deltaPitch) {
-        if (cam == null || !enabled()) {
-            return false;
+    public void turnCamera(double deltaYaw, double deltaPitch) {
+        if (cam == null) {
+            return;
         }
 
-        cam.turn(deltaYaw, deltaPitch);
+        camYaw += (float) deltaYaw;
 
-        camYaw = cam.getYRot();
-        camPitch = Mth.clamp(cam.getXRot(), -90.0f, 90.0f);
+        camPitch = Mth.clamp(
+                camPitch + (float) deltaPitch,
+                -90.0f,
+                90.0f
+        );
 
-        cam.setYRot(camYaw);
-        cam.setXRot(camPitch);
+        placeCamera();
+    }
 
-        return true;
+    /**
+     * Swallow attack and use inputs while freecam is active.
+     * The mouse mixin also cancels the original click event.
+     */
+    @Override
+    public void onPreTick(Minecraft mc) {
+        if (cam == null) {
+            return;
+        }
+
+        Options options = mc.options;
+
+        options.keyAttack.setDown(false);
+        options.keyUse.setDown(false);
+
+        while (options.keyAttack.consumeClick()) {
+        }
+
+        while (options.keyUse.consumeClick()) {
+        }
+
+        while (options.keyPickItem.consumeClick()) {
+        }
     }
 
     @Override
@@ -134,6 +165,9 @@ public class Freecam extends Module {
         }
     }
 
+    /**
+     * Move the detached camera without moving the real player.
+     */
     @Override
     public void onFrame(Minecraft mc) {
         if (cam == null) {
@@ -145,48 +179,55 @@ public class Freecam extends Module {
             return;
         }
 
-        LocalPlayer p = mc.player;
+        LocalPlayer player = mc.player;
 
+        // Keep the view attached to the freecam entity.
         mc.setCameraEntity(cam);
 
-        // Read rotation from the camera only; never feed player rotation
-        // back into the camera.
+        // Synchronize view and held-item rotation with the camera.
         camYaw = cam.getYRot();
-        camPitch = Mth.clamp(cam.getXRot(), -90.0f, 90.0f);
+        camPitch = Mth.clamp(
+                cam.getXRot(),
+                -90.0f,
+                90.0f
+        );
 
-        // Keep first-person held items aligned with the detached view.
-        p.setYRot(camYaw);
-        p.setXRot(camPitch);
-        p.yRotO = camYaw;
-        p.xRotO = camPitch;
-        p.setYHeadRot(camYaw);
-        p.yHeadRotO = camYaw;
+        player.setYRot(camYaw);
+        player.setXRot(camPitch);
 
-        // Keep the real player's visible body facing its original direction.
-        p.setYBodyRot(savedYaw);
-        p.yBodyRotO = savedYaw;
+        player.yRotO = camYaw;
+        player.xRotO = camPitch;
+
+        player.setYHeadRot(camYaw);
+        player.yHeadRotO = camYaw;
+
+        // Keep the player's body facing its original direction.
+        player.setYBodyRot(savedYaw);
+        player.yBodyRotO = savedYaw;
 
         long now = System.nanoTime();
+
         double dt = Math.min(
                 0.1,
-                Math.max(0.0, (now - lastNanos) / 1.0e9)
+                (now - lastNanos) / 1.0e9
         );
+
         lastNanos = now;
 
         if (mc.gui.screen() == null) {
-            Options o = mc.options;
+            Options options = mc.options;
 
             double forward =
-                    (o.keyUp.isDown() ? 1.0 : 0.0)
-                    - (o.keyDown.isDown() ? 1.0 : 0.0);
+                    (options.keyUp.isDown() ? 1 : 0)
+                    - (options.keyDown.isDown() ? 1 : 0);
 
             double strafe =
-                    (o.keyRight.isDown() ? 1.0 : 0.0)
-                    - (o.keyLeft.isDown() ? 1.0 : 0.0);
+                    (options.keyRight.isDown() ? 1 : 0)
+                    - (options.keyLeft.isDown() ? 1 : 0);
 
-            double vertical =
-                    (o.keyJump.isDown() ? 1.0 : 0.0)
-                    - (o.keyShift.isDown() ? 1.0 : 0.0);
+            double up =
+                    (options.keyJump.isDown() ? 1 : 0)
+                    - (options.keyShift.isDown() ? 1 : 0);
 
             double yaw = Math.toRadians(camYaw);
             double pitch = Math.toRadians(camPitch);
@@ -199,7 +240,7 @@ public class Freecam extends Module {
             double rightZ = -Math.sin(yaw);
 
             double mx = lookX * forward + rightX * strafe;
-            double my = lookY * forward + vertical;
+            double my = lookY * forward + up;
             double mz = lookZ * forward + rightZ * strafe;
 
             double len = Math.sqrt(
@@ -207,12 +248,11 @@ public class Freecam extends Module {
             );
 
             if (len > 1.0e-6) {
-                double multiplier = o.keySprint.isDown()
-                        ? boost.d()
-                        : 1.0;
-
-                double velocity = speed.d()
-                        * multiplier
+                double velocity =
+                        speed.d()
+                        * (options.keySprint.isDown()
+                                ? boost.d()
+                                : 1.0)
                         * dt
                         / Math.max(1.0, len);
 
@@ -225,33 +265,37 @@ public class Freecam extends Module {
         placeCamera();
     }
 
+    /**
+     * Position and rotate the detached camera.
+     */
     private void placeCamera() {
         if (cam == null) {
             return;
         }
 
-        cam.setPos(ex, ey - cam.getEyeHeight(), ez);
+        cam.setPos(
+                ex,
+                ey - cam.getEyeHeight(),
+                ez
+        );
+
         cam.setYRot(camYaw);
         cam.setXRot(camPitch);
+
         cam.setYHeadRot(camYaw);
         cam.setYBodyRot(camYaw);
+
         cam.setOldPosAndRot();
 
         cam.yHeadRotO = camYaw;
         cam.yBodyRotO = camYaw;
     }
 
-    private void restorePlayerRotation(LocalPlayer p) {
-        p.setYRot(savedYaw);
-        p.setXRot(savedPitch);
+    private void restorePlayerRotation(LocalPlayer player) {
+        player.setYRot(savedYaw);
+        player.setXRot(savedPitch);
 
-        p.yRotO = savedYaw;
-        p.xRotO = savedPitch;
-
-        p.setYHeadRot(savedYaw);
-        p.yHeadRotO = savedYaw;
-
-        p.setYBodyRot(savedYaw);
-        p.yBodyRotO = savedYaw;
+        player.yRotO = savedYaw;
+        player.xRotO = savedPitch;
     }
 }
