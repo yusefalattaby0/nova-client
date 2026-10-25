@@ -1,7 +1,10 @@
+
 {
   "required": true,
   "package": "dev.nova.mixin",
-  "client": [],
+  "client": [
+    "MouseHandlerMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }
