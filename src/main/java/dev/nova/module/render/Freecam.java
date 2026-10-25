@@ -1,6 +1,5 @@
 package dev.nova.module.render;
 
-import com.mojang.authlib.GameProfile;
 import dev.nova.module.Module;
 import dev.nova.setting.Setting;
 import net.minecraft.client.Minecraft;
@@ -9,107 +8,82 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.ClientInput;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.player.RemotePlayer;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.UUID;
+import java.lang.reflect.Field;
 
+/**
+ * Detached camera. Your real body stays where it is, keeps facing the same way, and you can see it
+ * standing there. The view is moved by a client-only stand-in entity (never sent to the server).
+ *
+ *  - WASD flies the camera; the player's own movement input is swapped for an empty one
+ *  - the mouse turns only the camera; the body keeps its original look direction
+ *  - while the game runs a tick, the view is handed back to your body, so mining and placing
+ *    still happen exactly where your body is facing
+ */
 public class Freecam extends Module {
-
-    private final Setting.Num speed =
-            add(new Setting.Num("Speed", 12, 1, 60, 1, " b/s"));
-
-    private final Setting.Num boost =
-            add(new Setting.Num("Sprint Boost", 2.5, 1, 6, 0.5, "x"));
+    private final Setting.Num speed = add(new Setting.Num("Speed", 12, 1, 60, 1, " b/s"));
+    private final Setting.Num boost = add(new Setting.Num("Sprint Boost", 2.5, 1, 6, 0.5, "x"));
+    private final Setting.Bool useBody = add(new Setting.Bool("Mine & Place From Body", true));
+    private final Setting.Bool hideHand = add(new Setting.Bool("Hide First-Person Hand", true));
 
     private RemotePlayer cam;
     private LocalPlayer owner;
     private ClientLevel level;
     private ClientInput savedInput;
 
-    private float savedYaw;
-    private float savedPitch;
+    private static Field handField;
 
-    private float camYaw;
-    private float camPitch;
-
-    private double ex;
-    private double ey;
-    private double ez;
-
+    private float savedYaw, savedPitch; // the body's look direction, kept for the whole session
+    private float camYaw, camPitch;
+    private double ex, ey, ez;
     private long lastNanos;
 
     public Freecam() {
-        super(
-                "Freecam",
-                "Fly a detached camera while your player stays put.",
-                Category.RENDER
-        );
+        super("Freecam", "Fly a detached camera. Your body stays put, visible, and keeps mining.", Category.RENDER);
     }
 
     @Override
     protected void onEnable() {
         Minecraft mc = Minecraft.getInstance();
-
-        LocalPlayer player = mc.player;
-        ClientLevel clientLevel = mc.level;
-
-        if (player == null || clientLevel == null) {
-            setEnabled(false);
+        LocalPlayer p = mc.player;
+        ClientLevel lvl = mc.level;
+        if (p == null || lvl == null) {
+            setEnabled(false); // can't start outside a world (also covers config load at startup)
             return;
         }
 
-        owner = player;
-        level = clientLevel;
-
-        savedYaw = player.getYRot();
-        savedPitch = player.getXRot();
-
+        owner = p;
+        level = lvl;
+        savedYaw = p.getYRot();
+        savedPitch = p.getXRot();
         camYaw = savedYaw;
         camPitch = savedPitch;
 
-        Vec3 eye = player.getEyePosition();
-
+        Vec3 eye = p.getEyePosition();
         ex = eye.x;
         ey = eye.y;
         ez = eye.z;
 
-        // Give the camera a different profile so it is not confused
-        // with the actual player.
-        GameProfile cameraProfile = new GameProfile(
-                UUID.randomUUID(),
-                "NovaFreecam"
-        );
-
-        cam = new RemotePlayer(clientLevel, cameraProfile);
-
+        cam = new RemotePlayer(lvl, p.getGameProfile());
         placeCamera();
 
-        // Freeze normal player movement without moving the player.
-        savedInput = player.input;
-        player.input = new ClientInput();
+        savedInput = p.input;
+        p.input = new ClientInput();
 
         mc.setCameraEntity(cam);
-
         lastNanos = System.nanoTime();
     }
 
     @Override
     protected void onDisable() {
         Minecraft mc = Minecraft.getInstance();
-
-        if (owner != null && savedInput != null) {
-            owner.input = savedInput;
-        }
-
-        if (owner != null) {
-            restorePlayerRotation(owner);
-        }
-
-        if (mc.player != null) {
-            mc.setCameraEntity(mc.player);
-        }
-
+        setHandVisible(mc, true);
+        if (owner != null && savedInput != null) owner.input = savedInput;
+        if (owner != null) restorePlayerRotation(owner);
+        if (mc.player != null) mc.setCameraEntity(mc.player);
         cam = null;
         owner = null;
         level = null;
@@ -117,131 +91,71 @@ public class Freecam extends Module {
     }
 
     private boolean stillValid(Minecraft mc) {
-        return owner != null
-                && mc.player == owner
-                && mc.level == level;
+        return mc.player == owner && mc.level == level && owner != null;
     }
 
-    /**
-     * Rotate only the free camera.
-     * The 0.15 multiplier matches normal Minecraft mouse rotation scaling.
-     */
-    public void turnCamera(double deltaYaw, double deltaPitch) {
-        if (cam == null) {
-            return;
-        }
-
-        camYaw += (float) (deltaYaw * 0.15);
-
-        camPitch = Mth.clamp(
-                camPitch + (float) (deltaPitch * 0.15),
-                -90.0f,
-                90.0f
-        );
-
-        placeCamera();
-    }
-
-    /**
-     * These methods let the first-person hand renderer use
-     * the free camera's view instead of the real player's view.
-     */
-    public float getCameraViewXRot(float partialTick) {
-        return cam == null
-                ? savedPitch
-                : cam.getViewXRot(partialTick);
-    }
-
-    public float getCameraViewYRot(float partialTick) {
-        return cam == null
-                ? savedYaw
-                : cam.getViewYRot(partialTick);
-    }
-
+    /** Start of every tick: hand the view back to the body so clicks act where the body faces. */
     @Override
     public void onPreTick(Minecraft mc) {
-        if (cam == null) {
-            return;
-        }
-
-        Options options = mc.options;
-
-        options.keyAttack.setDown(false);
-        options.keyUse.setDown(false);
-
-        while (options.keyAttack.consumeClick()) {
-        }
-
-        while (options.keyUse.consumeClick()) {
-        }
-
-        while (options.keyPickItem.consumeClick()) {
+        if (cam == null || !stillValid(mc)) return;
+        LocalPlayer p = mc.player;
+        Options o = mc.options;
+        if (useBody.get()) {
+            lockBody(p);
+            mc.setCameraEntity(p);
+        } else {
+            o.keyAttack.setDown(false);
+            o.keyUse.setDown(false);
+            while (o.keyAttack.consumeClick()) { }
+            while (o.keyUse.consumeClick()) { }
+            while (o.keyPickItem.consumeClick()) { }
         }
     }
 
     @Override
     public void onTick(Minecraft mc) {
-        if (cam != null && !stillValid(mc)) {
-            setEnabled(false);
-        }
-    }
-
-    @Override
-    public void onFrame(Minecraft mc) {
-        if (cam == null) {
-            return;
-        }
-
+        if (cam == null) return;
         if (!stillValid(mc)) {
             setEnabled(false);
             return;
         }
+        mc.setCameraEntity(cam); // the tick is over: look through the camera again
+    }
 
-        // Keep the camera detached from the real player.
+    /** Every rendered frame: apply mouse look and movement. */
+    @Override
+    public void onFrame(Minecraft mc) {
+        if (cam == null) return;
+        if (!stillValid(mc)) {
+            setEnabled(false);
+            return;
+        }
+        LocalPlayer p = mc.player;
+
+        // keep the game looking through our camera (cheap; guards against anything resetting it)
         mc.setCameraEntity(cam);
 
-        camYaw = cam.getYRot();
-        camPitch = Mth.clamp(
-                cam.getXRot(),
-                -90.0f,
-                90.0f
-        );
-
-        // IMPORTANT:
-        // Do not copy the camera's rotation onto the real player.
-        // The real player's position and rotation should stay put.
+        // Mouse look. The game turns the player; we move that turn onto the camera and put the body back.
+        camYaw += p.getYRot() - savedYaw;
+        camPitch = Mth.clamp(camPitch + (p.getXRot() - savedPitch), -90f, 90f);
+        lockBody(p);
+        setHandVisible(mc, !hideHand.get());
 
         long now = System.nanoTime();
-
-        double dt = Math.min(
-                0.1,
-                (now - lastNanos) / 1.0e9
-        );
-
+        double dt = Math.min(0.1, (now - lastNanos) / 1.0e9);
         lastNanos = now;
 
         if (mc.gui.screen() == null) {
-            Options options = mc.options;
-
-            double forward =
-                    (options.keyUp.isDown() ? 1 : 0)
-                    - (options.keyDown.isDown() ? 1 : 0);
-
-            double strafe =
-                    (options.keyRight.isDown() ? 1 : 0)
-                    - (options.keyLeft.isDown() ? 1 : 0);
-
-            double up =
-                    (options.keyJump.isDown() ? 1 : 0)
-                    - (options.keyShift.isDown() ? 1 : 0);
+            Options o = mc.options;
+            double forward = (o.keyUp.isDown() ? 1 : 0) - (o.keyDown.isDown() ? 1 : 0);
+            double strafe = (o.keyRight.isDown() ? 1 : 0) - (o.keyLeft.isDown() ? 1 : 0);
+            double up = (o.keyJump.isDown() ? 1 : 0) - (o.keyShift.isDown() ? 1 : 0);
 
             double yaw = Math.toRadians(camYaw);
             double pitch = Math.toRadians(camPitch);
-
             double lookX = -Math.sin(yaw) * Math.cos(pitch);
             double lookY = -Math.sin(pitch);
             double lookZ = Math.cos(yaw) * Math.cos(pitch);
-
             double rightX = -Math.cos(yaw);
             double rightZ = -Math.sin(yaw);
 
@@ -249,22 +163,12 @@ public class Freecam extends Module {
             double my = lookY * forward + up;
             double mz = lookZ * forward + rightZ * strafe;
 
-            double len = Math.sqrt(
-                    mx * mx + my * my + mz * mz
-            );
-
+            double len = Math.sqrt(mx * mx + my * my + mz * mz);
             if (len > 1.0e-6) {
-                double velocity =
-                        speed.d()
-                        * (options.keySprint.isDown()
-                                ? boost.d()
-                                : 1.0)
-                        * dt
-                        / Math.max(1.0, len);
-
-                ex += mx * velocity;
-                ey += my * velocity;
-                ez += mz * velocity;
+                double v = speed.d() * (o.keySprint.isDown() ? boost.d() : 1.0) * dt / Math.max(1.0, len);
+                ex += mx * v;
+                ey += my * v;
+                ez += mz * v;
             }
         }
 
@@ -272,33 +176,39 @@ public class Freecam extends Module {
     }
 
     private void placeCamera() {
-        if (cam == null) {
-            return;
-        }
-
-        cam.setPos(
-                ex,
-                ey - cam.getEyeHeight(),
-                ez
-        );
-
+        cam.setPos(ex, ey - cam.getEyeHeight(), ez);
         cam.setYRot(camYaw);
         cam.setXRot(camPitch);
-
+        // A living entity's view looks along its HEAD rotation, so that has to follow too.
         cam.setYHeadRot(camYaw);
         cam.setYBodyRot(camYaw);
-
-        cam.setOldPosAndRot();
-
+        cam.setOldPosAndRot(); // no interpolation lag: the camera is exactly where we put it
         cam.yHeadRotO = camYaw;
         cam.yBodyRotO = camYaw;
     }
 
-    private void restorePlayerRotation(LocalPlayer player) {
-        player.setYRot(savedYaw);
-        player.setXRot(savedPitch);
+    /** Put the body back to the direction it was facing when Freecam started. */
+    private void lockBody(LocalPlayer p) {
+        p.setYRot(savedYaw);
+        p.setXRot(savedPitch);
+        p.yRotO = savedYaw;
+        p.xRotO = savedPitch;
+    }
 
-        player.yRotO = savedYaw;
-        player.xRotO = savedPitch;
+    private void restorePlayerRotation(LocalPlayer p) {
+        lockBody(p);
+    }
+
+    /** Best effort: the hand overlay is switched by a private flag, so this quietly does nothing if it is missing. */
+    private static void setHandVisible(Minecraft mc, boolean visible) {
+        try {
+            if (handField == null) {
+                handField = GameRenderer.class.getDeclaredField("renderHand");
+                handField.setAccessible(true);
+            }
+            handField.setBoolean(mc.gameRenderer, visible);
+        } catch (Throwable ignored) {
+            // field not found in this version: leave the hand alone
+        }
     }
 }

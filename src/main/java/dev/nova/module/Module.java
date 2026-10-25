@@ -12,6 +12,7 @@ public abstract class Module {
     public enum Category {
         RENDER("Render"),
         COMBAT("Combat"),
+        UTILITY("Utility"),
         CLIENT("Client");
 
         public final String label;

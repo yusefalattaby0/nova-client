@@ -2,9 +2,16 @@ package dev.nova;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.nova.gui.BaseHud;
+import dev.nova.gui.BaseMapScreen;
 import dev.nova.gui.ClickGui;
+import dev.nova.gui.RegionMapScreen;
+import dev.nova.gui.UtilityHud;
+import dev.nova.gui.WheelScreen;
 import dev.nova.module.ModuleManager;
+import dev.nova.module.render.BaseFinder;
 import dev.nova.module.render.Freecam;
+import dev.nova.module.utility.DonutWheel;
+import dev.nova.module.utility.RegionMap;
 import dev.nova.util.Config;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -33,6 +40,15 @@ public class NovaClient implements ClientModInitializer {
     public static final KeyMapping FREECAM_KEY = KeyMappingHelper.registerKeyMapping(
             new KeyMapping("key.nova.freecam", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V, CATEGORY));
 
+    public static final KeyMapping WHEEL_KEY = KeyMappingHelper.registerKeyMapping(
+            new KeyMapping("key.nova.wheel", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G, CATEGORY));
+
+    public static final KeyMapping BASE_MAP_KEY = KeyMappingHelper.registerKeyMapping(
+            new KeyMapping("key.nova.base_map", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, CATEGORY));
+
+    public static final KeyMapping REGION_KEY = KeyMappingHelper.registerKeyMapping(
+            new KeyMapping("key.nova.region_map", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_N, CATEGORY));
+
     @Override
     public void onInitializeClient() {
         ModuleManager.init();
@@ -46,6 +62,22 @@ public class NovaClient implements ClientModInitializer {
             while (FREECAM_KEY.consumeClick()) {
                 if (mc.gui.screen() == null) ModuleManager.get(Freecam.class).toggle();
             }
+            while (WHEEL_KEY.consumeClick()) {
+                DonutWheel w = ModuleManager.get(DonutWheel.class);
+                if (mc.gui.screen() == null && mc.player != null && w != null && w.enabled()) {
+                    mc.gui.setScreen(new WheelScreen(w));
+                }
+            }
+            while (BASE_MAP_KEY.consumeClick()) {
+                BaseFinder bf = ModuleManager.get(BaseFinder.class);
+                if (mc.gui.screen() == null && mc.player != null && bf != null) mc.gui.setScreen(new BaseMapScreen());
+            }
+            while (REGION_KEY.consumeClick()) {
+                RegionMap rm = ModuleManager.get(RegionMap.class);
+                if (mc.gui.screen() == null && mc.player != null && rm != null && rm.enabled()) {
+                    mc.gui.setScreen(new RegionMapScreen());
+                }
+            }
             ModuleManager.tick(mc);
         });
 
@@ -55,6 +87,10 @@ public class NovaClient implements ClientModInitializer {
         // Base Finder's on-screen list and tooltip.
         HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT,
                 Identifier.fromNamespaceAndPath(ID, "base_finder"), BaseHud::render);
+
+        // Auto RTP panel and log, coordinates box.
+        HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT,
+                Identifier.fromNamespaceAndPath(ID, "utility"), UtilityHud::render);
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> Config.save());
 

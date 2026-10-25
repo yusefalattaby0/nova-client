@@ -1,5 +1,8 @@
 {
   "key.nova.open_gui": "Open ClickGUI",
   "key.nova.freecam": "Toggle Freecam",
-  "key.category.nova.main": "Nova Client"
+  "key.category.nova.main": "Nova Client",
+  "key.nova.wheel": "Hold for Donut Wheel",
+  "key.nova.base_map": "Open Base Finder Map",
+  "key.nova.region_map": "Open Region Map"
 }

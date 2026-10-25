@@ -45,4 +45,58 @@ final class Draw {
     static void clipOff(GuiGraphicsExtractor g) {
         g.disableScissor();
     }
+
+    static void border(GuiGraphicsExtractor g, int x, int y, int w, int h, int color) {
+        g.fill(x, y, x + w, y + 1, color);
+        g.fill(x, y + h - 1, x + w, y + h, color);
+        g.fill(x, y + 1, x + 1, y + h - 1, color);
+        g.fill(x + w - 1, y + 1, x + w, y + h - 1, color);
+    }
+
+    /** Rounded rectangle with a 1px outline. */
+    static void roundBorder(GuiGraphicsExtractor g, int x, int y, int w, int h, int r, int fill, int line) {
+        round(g, x, y, w, h, r, line);
+        round(g, x + 1, y + 1, w - 2, h - 2, Math.max(0, r - 1), fill);
+    }
+
+    /** Filled circle from row fills. */
+    static void disc(GuiGraphicsExtractor g, int cx, int cy, int r, int color) {
+        for (int dy = -r; dy <= r; dy++) {
+            int half = (int) Math.round(Math.sqrt(Math.max(0, r * (double) r - dy * (double) dy + r * 0.3)));
+            g.fill(cx - half, cy + dy, cx + half + 1, cy + dy + 1, color);
+        }
+    }
+
+    static void ring(GuiGraphicsExtractor g, int cx, int cy, int r, int color) {
+        disc(g, cx, cy, r, color);
+    }
+
+    static void textCentered(GuiGraphicsExtractor g, String s, int cx, int y, int color) {
+        text(g, s, cx - width(s) / 2, y, color);
+    }
+
+    /** Small label with a background. Returns its width. */
+    static int chip(GuiGraphicsExtractor g, String s, int x, int y, int fill, int textColor) {
+        int w = width(s) + 10;
+        round(g, x, y, w, 12, 3, fill);
+        text(g, s, x + 5, y + 2, textColor);
+        return w;
+    }
+
+    static int mix(int a, int b, float t) {
+        return dev.nova.util.Colors.lerp(a, b, Math.max(0f, Math.min(1f, t)));
+    }
+
+    /** Fake bold: the same text drawn twice, one pixel apart. */
+    static void bold(GuiGraphicsExtractor g, String s, int x, int y, int color) {
+        text(g, s, x, y, color);
+        text(g, s, x + 1, y, color);
+    }
+
+    /** Little on/off pill, like the ClickGUI switch. */
+    static void pill(GuiGraphicsExtractor g, int x, int y, boolean on, int accent) {
+        round(g, x, y, 26, 12, 6, on ? accent : 0xFF2E2E39);
+        int kx = x + (on ? 16 : 2);
+        round(g, kx, y + 2, 8, 8, 4, 0xFFFFFFFF);
+    }
 }

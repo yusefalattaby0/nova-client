@@ -12,6 +12,11 @@ import dev.nova.module.render.OreFinder;
 import dev.nova.module.render.RespawnAnchorFinder;
 import dev.nova.module.render.SpawnerFinder;
 import dev.nova.module.render.StorageFinder;
+import dev.nova.module.render.Trails;
+import dev.nova.module.utility.AutoRtp;
+import dev.nova.module.utility.DonutWheel;
+import dev.nova.module.utility.InfoHud;
+import dev.nova.module.utility.RegionMap;
 import dev.nova.util.Config;
 import net.minecraft.client.Minecraft;
 
@@ -34,7 +39,15 @@ public final class ModuleManager {
         register(new AutoTotem());
         register(new FastCrystal());
         register(new Freecam());
+        register(new Trails());
+        register(new AutoRtp());
+        register(new DonutWheel());
+        register(new RegionMap());
+        register(new InfoHud());
         register(new GuiSettings());
+        // On by default: their keys only work while the module is on. A saved config can still turn them off.
+        get(DonutWheel.class).setEnabled(true);
+        get(RegionMap.class).setEnabled(true);
         Config.load();
     }
 
