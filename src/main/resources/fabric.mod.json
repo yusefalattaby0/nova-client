@@ -7,7 +7,7 @@
   "authors": ["You"],
   "license": "MIT",
   "environment": "client",
-  "entrypoints": {
+    "entrypoints": {
     "client": ["dev.nova.NovaClient"]
   },
   "mixins": [
