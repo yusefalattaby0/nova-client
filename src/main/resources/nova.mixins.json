@@ -1,9 +1,9 @@
-
 {
   "required": true,
   "package": "dev.nova.mixin",
   "client": [
-    "MouseHandlerMixin"
+    "MouseHandlerMixin",
+    "ItemInHandRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
